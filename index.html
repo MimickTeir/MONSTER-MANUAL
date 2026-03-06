@@ -368,14 +368,14 @@ function SearchPage({monsters,openEdit}) {
             <Lbl>Biome</Lbl>
             <select value={biome} onChange={e=>setBiome(e.target.value)} style={selStyle(biome!=="Any")}>
               <option value="Any">Any Biome</option>
-              {BIOMES.map(b=><option key={b}>{BIOME_ICONS[b]} {b}</option>)}
+              {BIOMES.map(b=><option key={b} value={b}>{BIOME_ICONS[b]} {b}</option>)}
             </select>
           </div>
           <div>
             <Lbl>Classification</Lbl>
             <select value={type} onChange={e=>setType(e.target.value)} style={selStyle(type!=="Any")}>
               <option value="Any">Any</option>
-              {TYPES.map(t=><option key={t}>{TYPE_ICONS[t]} {t}</option>)}
+              {TYPES.map(t=><option key={t} value={t}>{TYPE_ICONS[t]} {t}</option>)}
             </select>
           </div>
         </div>
