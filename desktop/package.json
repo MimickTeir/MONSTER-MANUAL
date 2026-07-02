@@ -8,5 +8,44 @@
   "license": "UNLICENSED",
   "dependencies": {
     "resedit": "^3.0.2"
+  },
+  "devDependencies": {
+    "electron": "32.3.3",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.theatlas.app",
+    "productName": "The Atlas",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "app",
+        "to": "app"
+      }
+    ],
+    "afterPack": "scripts/setIcon.js",
+    "win": {
+      "target": "nsis",
+      "icon": "build/icon.ico",
+      "signAndEditExecutable": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "artifactName": "The-Atlas-Setup-${version}.exe",
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
+      "shortcutName": "The Atlas",
+      "warningsAsErrors": false
+    },
+    "electronDist": "electron-dist",
+    "electronVersion": "32.3.3",
+    "publish": null
   }
 }

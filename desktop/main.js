@@ -18,7 +18,7 @@ const { pathToFileURL } = require('url');
 
 // Bump every build. Injected (from main.js, which the installer always replaces) as a
 // visible tag + window.__ATLAS_BUILD so the running version is unambiguous.
-const BUILD = 'v15 · 2026-07-01';
+const BUILD = 'v17 · 2026-07-02';
 
 const SCHEME = 'app';
 const HOST = 'atlas';
