@@ -282,7 +282,7 @@
     .lib-x:hover{color:#e0c898;background:rgba(255,255,255,.05);}
     .lib-body{flex:1;overflow-y:auto;padding:16px 14px;display:flex;flex-direction:column;gap:13px;}
     .lib-body::-webkit-scrollbar{width:8px;}.lib-body::-webkit-scrollbar-thumb{background:rgba(201,168,76,.2);border-radius:4px;}
-    .lib-msg{max-width:88%;font-family:'Crimson Text',Georgia,serif;font-size:.95rem;line-height:1.6;}
+    .lib-msg{flex-shrink:0;max-width:88%;font-family:'Crimson Text',Georgia,serif;font-size:.95rem;line-height:1.6;}
     .lib-msg.lib-from{align-self:flex-start;background:rgba(201,168,76,.07);border:1px solid rgba(201,168,76,.18);color:#d8ccb0;
       padding:11px 13px;border-radius:12px 12px 12px 3px;}
     .lib-msg.lib-you{align-self:flex-end;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);color:#cfc6b4;
@@ -300,7 +300,11 @@
     .lib-typing i:nth-child(2){animation-delay:.15s}.lib-typing i:nth-child(3){animation-delay:.3s}
     @keyframes libPulse{0%,80%,100%{opacity:.3;transform:translateY(0)}40%{opacity:1;transform:translateY(-3px)}}
     /* draft entry card */
-    .lib-draft{align-self:flex-start;width:88%;background:rgba(10,14,28,.9);border:1px solid rgba(201,168,76,.32);border-radius:10px;overflow:hidden;}
+    /* flex-shrink:0 — cards are flex children of the scrollable .lib-body column;
+       their overflow:hidden zeroes the automatic min-height, so without it the
+       column CRUSHES them to a sliver (hiding "File all"/"Add to codex") instead
+       of scrolling. */
+    .lib-draft{flex-shrink:0;align-self:flex-start;width:88%;background:rgba(10,14,28,.9);border:1px solid rgba(201,168,76,.32);border-radius:10px;overflow:hidden;}
     .lib-draft-top{padding:9px 12px;border-bottom:1px solid rgba(201,168,76,.16);display:flex;align-items:center;gap:8px;
       background:rgba(201,168,76,.06);}
     .lib-draft-type{font:.56rem 'JetBrains Mono',monospace;letter-spacing:.1em;text-transform:uppercase;color:#9a8348;border:1px solid rgba(201,168,76,.3);padding:2px 6px;border-radius:4px;}
@@ -330,7 +334,7 @@
       background:rgba(201,168,76,.08);color:#c9a84c;font-size:1rem;display:flex;align-items:center;justify-content:center;transition:background .12s;}
     .lib-attach:hover{background:rgba(201,168,76,.2);}
     /* import summary card */
-    .lib-import{align-self:flex-start;width:92%;background:rgba(10,14,28,.92);border:1px solid rgba(96,160,200,.34);border-radius:10px;overflow:hidden;}
+    .lib-import{flex-shrink:0;align-self:flex-start;width:92%;background:rgba(10,14,28,.92);border:1px solid rgba(96,160,200,.34);border-radius:10px;overflow:hidden;}
     .lib-import-top{padding:9px 12px;border-bottom:1px solid rgba(96,160,200,.18);font-family:'Cinzel',serif;color:#bcd6ea;font-size:.9rem;font-weight:700;display:flex;align-items:center;gap:8px;}
     .lib-import-list{padding:8px 12px;max-height:230px;overflow-y:auto;}
     .lib-import-row{display:flex;align-items:center;gap:7px;padding:3px 0;font-size:.78rem;color:#c7bea6;}
@@ -1239,8 +1243,29 @@
     return docxToBlocks(new TextDecoder("utf-8").decode(await _unzipEntry(buf, "word/document.xml")));
   }
   async function extractPdf(buf) {
-    const lib = window.pdfjsLib || (window.pdfjsDistBuildPdf && window.pdfjsDistBuildPdf);
-    if (!lib || !lib.getDocument) throw new Error("PDF reader isn't available here");
+    let lib = window.pdfjsLib || (window.pdfjsDistBuildPdf && window.pdfjsDistBuildPdf);
+    if (!lib || !lib.getDocument) {
+      // Lazy-load the same pdf.js build the character-sheet importer uses —
+      // without this, attaching a PDF only worked if that importer ran first.
+      const CDN = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
+      try {
+        if (typeof _loadScript === "function") { await _loadScript(CDN); }
+        else {
+          await new Promise((res, rej) => {
+            if (document.querySelector('script[src="' + CDN + '"]')) { res(); return; }
+            const sc = document.createElement("script");
+            sc.src = CDN; sc.onload = res; sc.onerror = rej;
+            document.head.appendChild(sc);
+          });
+        }
+        if (window.pdfjsLib) {
+          window.pdfjsLib.GlobalWorkerOptions.workerSrc =
+            "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+        }
+      } catch (e) {}
+      lib = window.pdfjsLib || (window.pdfjsDistBuildPdf && window.pdfjsDistBuildPdf);
+    }
+    if (!lib || !lib.getDocument) throw new Error("PDF reader isn't available here — reading a PDF needs an internet connection the first time");
     const pdf = await lib.getDocument({ data: buf }).promise;
     const blocks = [];
     for (let pg = 1; pg <= pdf.numPages; pg++) {
