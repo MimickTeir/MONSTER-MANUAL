@@ -1,0 +1,12 @@
+{
+  "name": "the-atlas",
+  "productName": "The Atlas",
+  "version": "0.1.0-beta",
+  "description": "The Atlas — Shattered Isles campaign hub (desktop)",
+  "main": "main.js",
+  "author": "The Atlas",
+  "license": "UNLICENSED",
+  "dependencies": {
+    "resedit": "^3.0.2"
+  }
+}

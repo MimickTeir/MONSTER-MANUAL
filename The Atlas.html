@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>The Atlas — Campaign Launcher</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700;900&family=Crimson+Text:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#06090f; --bg3:#0a0e1a;
+  --surface:rgba(8,12,22,0.93); --surface2:rgba(11,15,30,0.95); --surface3:rgba(16,21,40,0.96);
+  --gold:#c8a050; --gold2:#e8c070; --gold3:rgba(200,160,80,0.12); --gold-faint:rgba(200,160,80,0.06);
+  --border:rgba(180,140,60,0.20); --border2:rgba(180,140,60,0.42); --border3:rgba(180,140,60,0.10);
+  --faint:rgba(255,255,255,0.04); --faint2:rgba(255,255,255,0.07);
+  --bone:#ede4d0; --text:#d4cbb8; --muted:#7e745f;
+  --r:12px; --r2:7px; --r3:18px;
+  --serif:'Cinzel',Georgia,serif;
+  --body:'Crimson Text',Georgia,serif;
+  --mono:'JetBrains Mono',ui-monospace,'SF Mono',monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0;}
+html,body{height:100%;}
+body{
+  background:
+    radial-gradient(ellipse at 20% -10%, rgba(200,160,80,0.07), transparent 55%),
+    radial-gradient(ellipse at 90% 110%, rgba(74,122,114,0.06), transparent 50%),
+    var(--bg);
+  color:var(--text);
+  font-family:var(--body);
+  font-size:16px;
+  line-height:1.5;
+  -webkit-font-smoothing:antialiased;
+  text-rendering:optimizeLegibility;
+  overflow:hidden;
+}
+#root{height:100vh;display:flex;flex-direction:column;position:relative;z-index:1;}
+main{overflow-y:auto;}
+
+/* — scrollbars — */
+::-webkit-scrollbar{width:9px;height:9px;}
+::-webkit-scrollbar-track{background:transparent;}
+::-webkit-scrollbar-thumb{background:rgba(200,160,80,0.18);border-radius:5px;}
+::-webkit-scrollbar-thumb:hover{background:rgba(200,160,80,0.34);}
+::selection{background:rgba(200,160,80,0.32);color:var(--bone);}
+
+/* — type — */
+.a-serif{font-family:var(--serif);}
+.a-mono{font-family:var(--mono);}
+.a-display{font-family:var(--serif);font-weight:700;color:var(--bone);letter-spacing:0.02em;line-height:1.06;}
+.a-kicker{font-family:var(--mono);text-transform:uppercase;letter-spacing:0.22em;font-size:0.6rem;color:var(--gold);font-weight:500;}
+.a-label{font-family:var(--mono);text-transform:uppercase;letter-spacing:0.1em;font-size:0.62rem;color:var(--muted);display:block;margin-bottom:6px;}
+
+/* — buttons — */
+.a-btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;padding:9px 15px;border-radius:var(--r2);border:1px solid var(--border2);background:var(--faint);color:var(--text);font-family:var(--serif);font-size:0.82rem;letter-spacing:0.02em;line-height:1;cursor:pointer;transition:all .15s;white-space:nowrap;}
+.a-btn:hover{background:var(--gold3);color:var(--bone);}
+.a-btn:active{transform:translateY(1px);}
+.a-btn-sm{padding:6px 10px;font-size:0.72rem;gap:5px;}
+.a-btn-primary{background:linear-gradient(135deg,#e3b96e,#c8a050 55%,#9a7732);border-color:#caa24f;color:#1a1206;font-weight:600;box-shadow:inset 0 1px 0 rgba(255,255,255,0.35),0 2px 12px rgba(200,160,80,0.18);}
+.a-btn-primary:hover{filter:brightness(1.08);background:linear-gradient(135deg,#e3b96e,#c8a050 55%,#9a7732);color:#1a1206;}
+.a-btn-ghost{background:transparent;border-color:var(--border);color:var(--muted);}
+.a-btn-ghost:hover{background:var(--faint);color:var(--bone);border-color:var(--border2);}
+.a-btn-danger{background:rgba(204,51,68,0.08);border-color:rgba(204,51,68,0.4);color:#e0768a;}
+.a-btn-danger:hover{background:rgba(204,51,68,0.16);color:#f08ca0;}
+.a-iconbtn{display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:var(--r2);border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;transition:all .15s;flex-shrink:0;}
+.a-iconbtn:hover{background:var(--faint);color:var(--bone);border-color:var(--border2);}
+
+/* — form controls — */
+.a-input,.a-textarea,.a-select{width:100%;padding:8px 11px;border-radius:var(--r2);border:1px solid var(--border);background:rgba(0,0,0,0.25);color:var(--text);font-family:var(--body);font-size:0.95rem;transition:all .15s;outline:none;}
+.a-input:focus,.a-textarea:focus,.a-select:focus{border-color:var(--border2);background:rgba(0,0,0,0.35);box-shadow:0 0 0 3px var(--gold-faint);}
+.a-input::placeholder,.a-textarea::placeholder{color:var(--muted);opacity:0.7;}
+.a-textarea{resize:vertical;line-height:1.5;min-height:64px;}
+.a-select{cursor:pointer;appearance:none;-webkit-appearance:none;padding-right:30px;background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23c8a050' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>");background-repeat:no-repeat;background-position:right 10px center;}
+.a-select option{background:#0c1020;color:var(--text);}
+
+/* — surfaces — */
+.a-card{background:linear-gradient(180deg,var(--surface),var(--surface2));border:1px solid var(--border);border-radius:var(--r);overflow:hidden;transition:transform .18s,border-color .18s,box-shadow .18s;}
+.a-card-hov{cursor:pointer;}
+.a-card-hov:hover{border-color:var(--border2);transform:translateY(-3px);box-shadow:0 16px 40px -14px rgba(0,0,0,0.65);}
+
+/* — chips / pills — */
+.a-chip{display:inline-flex;align-items:center;gap:6px;padding:5px 11px;border-radius:999px;border:1px solid var(--border);background:var(--faint);font-family:var(--mono);font-size:0.62rem;letter-spacing:0.04em;}
+.a-pill{display:inline-flex;align-items:center;gap:5px;padding:3px 9px;border-radius:999px;border:1px solid var(--border);background:var(--gold3);color:var(--gold2);font-family:var(--mono);font-size:0.6rem;letter-spacing:0.04em;font-weight:500;white-space:nowrap;}
+.a-pill-green{background:rgba(67,201,141,0.12);color:#6fd9a6;border-color:rgba(67,201,141,0.3);}
+.a-pill-muted{background:var(--faint);color:var(--muted);border-color:var(--border);}
+
+/* — placeholder art base — */
+.a-ph{background:var(--bg3);}
+
+/* — modal — */
+.a-overlay{position:fixed;inset:0;z-index:300;display:grid;place-items:center;padding:24px;background:rgba(4,5,9,0.72);backdrop-filter:blur(6px);animation:a-fade .18s ease;}
+.a-modal{animation:a-rise .22s cubic-bezier(.2,.8,.2,1);}
+@keyframes a-fade{from{opacity:0}to{opacity:1}}
+@keyframes a-rise{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
+@keyframes fi{from{opacity:0}to{opacity:1}}
+.fade-in{animation:fi .22s ease both;}
+@keyframes atlas-pulse{0%,100%{box-shadow:0 0 0 0 rgba(200,160,80,0.45);}50%{box-shadow:0 0 0 9px rgba(200,160,80,0);}}
+
+/* — boot — */
+.boot{position:fixed;inset:0;display:grid;place-items:center;color:var(--muted);font-family:var(--mono);text-transform:uppercase;letter-spacing:0.3em;font-size:12px;}
+.boot::before{content:"";width:28px;height:28px;border:1.5px solid var(--border2);border-top-color:var(--gold2);border-radius:50%;animation:spin 1.1s linear infinite;margin-right:14px;}
+@keyframes spin{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+
+<div id="root"><div class="boot">Charting the isles</div></div>
+
+<template id="__bundler_thumbnail">
+<svg viewBox="0 0 400 300" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#0b1020"/><stop offset="100%" stop-color="#06090f"/></linearGradient>
+    <linearGradient id="brass" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#e3b96e"/><stop offset="60%" stop-color="#9a7732"/><stop offset="100%" stop-color="#5f4720"/></linearGradient>
+  </defs>
+  <rect width="400" height="300" fill="url(#bg)"/>
+  <g transform="translate(200 150)" stroke="#0b0a0d" stroke-width="3" fill="none" stroke-linecap="round">
+    <circle r="60" fill="url(#brass)" stroke="#36303e" stroke-width="2"/>
+    <circle r="34"/>
+    <path d="M0 -46 L8 0 L0 46 L-8 0 Z" fill="#0b0a0d" opacity="0.6" stroke="none"/>
+    <path d="M0 -54 L0 -48 M0 48 L0 54 M-54 0 L-48 0 M48 0 L54 0"/>
+  </g>
+  <text x="200" y="262" text-anchor="middle" font-family="Georgia, serif" font-style="italic" font-size="17" fill="#e8dcc0">The Atlas</text>
+</svg>
+</template>
+
+<!-- React + Babel (pinned) -->
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<!-- Launcher source (order: icons → data → ui primitives/store → systems → builder → campaigns → host → app/mount) -->
+<script type="text/babel" src="core/atlas-icons.jsx"></script>
+<script type="text/babel" src="core/atlas-data.jsx"></script>
+<script type="text/babel" src="core/atlas-ui.jsx"></script>
+<script type="text/babel" src="core/atlas-systems.jsx"></script>
+<script type="text/babel" src="core/atlas-builder.jsx"></script>
+<script type="text/babel" src="core/atlas-campaigns.jsx"></script>
+<script type="text/babel" src="core/atlas-bestiary.jsx"></script>
+<script type="text/babel" src="core/atlas-host.jsx"></script>
+<script type="text/babel" src="core/atlas-app.jsx"></script>
+
+</body>
+</html>
