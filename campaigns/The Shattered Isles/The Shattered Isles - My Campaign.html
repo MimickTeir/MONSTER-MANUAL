@@ -9345,10 +9345,14 @@ const CODEX_CSS = `
      "#tab-lore{display:flex}" here outranks ".tab-panel{display:none}"
      (ID > class) and would pin Lore visible over every other tab. */
   #tab-lore.active { display: flex; }
-  .codex-scroll::-webkit-scrollbar { width: 4px; }
-  .codex-scroll::-webkit-scrollbar-track { background: transparent; }
-  .codex-scroll::-webkit-scrollbar-thumb { background: rgba(199,154,81,0.15); border-radius: 2px; }
-  .codex-scroll::-webkit-scrollbar-thumb:hover { background: rgba(199,154,81,0.28); }
+  /* A real, grabbable scrollbar — the old 4px ghost was unusable on desktop. */
+  .codex-scroll { scrollbar-width: auto; scrollbar-color: rgba(199,154,81,0.45) rgba(0,0,0,0.25); }
+  .codex-scroll::-webkit-scrollbar { width: 13px; }
+  .codex-scroll::-webkit-scrollbar-track { background: rgba(0,0,0,0.25); border-left: 1px solid var(--ink-line); }
+  .codex-scroll::-webkit-scrollbar-thumb { background: rgba(199,154,81,0.4); border-radius: 7px;
+    border: 3px solid rgba(11,10,13,0.9); background-clip: padding-box; min-height: 48px; }
+  .codex-scroll::-webkit-scrollbar-thumb:hover { background-color: rgba(199,154,81,0.65); }
+  .codex-scroll::-webkit-scrollbar-thumb:active { background-color: rgba(227,185,110,0.8); }
 
   .codex-navbtn { transition: background 120ms, color 120ms; }
   .codex-navbtn:hover { background: var(--ink) !important; color: var(--bone) !important; }
@@ -10238,7 +10242,7 @@ function _codexShellHtml() {
     ${_codexSidebarHtml()}
     <div id="codex-main" style="flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0">
       ${_codexTopbarHtml()}
-      <div id="codex-main-body" style="flex:1;overflow:hidden;min-height:0">
+      <div id="codex-main-body" style="flex:1;overflow:hidden;min-height:0;display:flex;flex-direction:column">
         ${_codexViewHtml()}
       </div>
     </div>
@@ -10541,14 +10545,17 @@ function _codexLibraryHtml() {
     </div>`;
   }
 
-  // Doc grid
+  // Doc grid — filtered views keep the flat grid; the unfiltered library
+  // shelves every folio under its archive, like genres in a library.
   var gridHtml = '';
-  if (displayed.length) {
+  if (displayed.length && !_codexFilter) {
+    gridHtml = _codexShelvesHtml(displayed);
+  } else if (displayed.length) {
     gridHtml = `
     <div style="margin-bottom:8px">
       <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:14px">
         <h3 style="font-family:var(--serif-display);font-weight:400;font-size:1.2rem;color:var(--bone);margin:0">
-          ${_codexFilter ? _escHtml(CODEX_TYPE_MAP[_codexFilter.id]?.label || '') : 'Recent folios'}
+          ${_escHtml(CODEX_TYPE_MAP[_codexFilter.id]?.label || '')}
           <span style="font-family:var(--mono);font-size:.62rem;color:var(--ash);margin-left:10px">${displayed.length}</span>
         </h3>
       </div>
@@ -10570,6 +10577,68 @@ function _codexLibraryHtml() {
   return `<div class="codex-scroll" style="flex:1;overflow-y:auto;padding:24px 28px 60px">
     ${filterBanner}${npcEmbed}${calendarEmbed}${heroHtml}${gridHtml}
   </div>`;
+}
+
+// ── LIBRARY SHELVES ──────────────────────────────────────────────────────────
+// The unfiltered library groups folios by archive — each archive is a genre
+// shelf (Locations holds Embercliff, NPCs hold the cast, …). Custom archives
+// get shelves automatically; anything with an unknown type lands on "Unfiled".
+function _codexShelvesHtml(entries) {
+  var CAP = 8; // folios per shelf before "see the rest" takes over
+  var known = {};
+  CODEX_DOC_TYPES.forEach(function(t) { if (t.id !== 'all') known[t.id] = true; });
+
+  function shelf(t, es) {
+    if (!es.length) return '';
+    es = es.slice().sort(function(a, b) { return (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0); });
+    var shown = t.id ? es.slice(0, CAP) : es; // no archive to open for "Unfiled" — show everything
+    var more  = es.length - shown.length;
+    var openBtn = t.id ? `<button onclick="_codexSetFilter({kind:'type',id:'${t.id}'})"
+        style="background:transparent;border:1px solid var(--ink-edge);color:var(--bone-mid);padding:4px 11px;border-radius:3px;
+               font-family:var(--serif-sc);text-transform:uppercase;letter-spacing:.16em;font-size:.58rem;cursor:pointer;flex-shrink:0"
+        onmouseover="this.style.color='var(--brass-glow)';this.style.borderColor='var(--brass-deep)'"
+        onmouseout="this.style.color='var(--bone-mid)';this.style.borderColor='var(--ink-edge)'">Open archive →</button>` : '';
+    return `
+    <div style="margin-bottom:36px">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:2px">
+        <h3 style="font-family:var(--serif-display);font-weight:400;font-size:1.15rem;color:var(--bone);margin:0;display:flex;align-items:center;gap:9px">
+          <span style="font-size:.95rem">${t.icon}</span>${_escHtml(t.label)}
+        </h3>
+        <span style="font-family:var(--mono);font-size:.62rem;color:var(--ash)">${es.length} folio${es.length === 1 ? '' : 's'}</span>
+        <span style="flex:1"></span>
+        ${openBtn}
+      </div>
+      <div style="height:2px;background:linear-gradient(90deg,var(--brass-deep) 0%,rgba(139,106,47,.25) 55%,transparent);border-radius:1px;margin-bottom:14px"></div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px">
+        ${shown.map(function(e) { return _codexDocCard(e); }).join('')}
+      </div>
+      ${more > 0 ? `<button onclick="_codexSetFilter({kind:'type',id:'${t.id}'})"
+        style="margin-top:10px;width:100%;padding:8px;background:transparent;border:1px dashed var(--ink-edge);border-radius:4px;
+               color:var(--bone-mid);font-family:var(--serif-body);font-style:italic;font-size:.82rem;cursor:pointer"
+        onmouseover="this.style.color='var(--brass-glow)';this.style.borderColor='var(--brass-deep)'"
+        onmouseout="this.style.color='var(--bone-mid)';this.style.borderColor='var(--ink-edge)'">…and ${more} more on this shelf — open the ${_escHtml(t.label)} archive</button>` : ''}
+    </div>`;
+  }
+
+  var html = CODEX_DOC_TYPES.map(function(t) {
+    if (t.id === 'all') return '';
+    return shelf(t, entries.filter(function(e) { return e.type === t.id; }));
+  }).join('');
+
+  // Types no archive claims (legacy / removed) still get a shelf each, so no
+  // folio is ever invisible — the genre exists because its books exist.
+  var strays = {};
+  entries.forEach(function(e) {
+    if (known[e.type]) return;
+    var ty = e.type || '';
+    (strays[ty] = strays[ty] || []).push(e);
+  });
+  html += Object.keys(strays).sort().map(function(ty) {
+    var label = ty ? ty.charAt(0).toUpperCase() + ty.slice(1) : 'Unfiled';
+    return shelf({ id: ty, icon: '🗃️', label: label }, strays[ty]);
+  }).join('');
+
+  return `<div style="margin-bottom:8px">${html}</div>`;
 }
 
 function _codexHeroHtml(entries) {
