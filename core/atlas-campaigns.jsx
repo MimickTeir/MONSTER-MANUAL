@@ -333,7 +333,7 @@ const CampaignDetail = ({ c, sys, onClose, onLaunch, onOpenSystem, onArchive, on
       <div style={{ display: "flex", gap: 10 }}>
         <button className="a-btn a-btn-ghost a-btn-sm" onClick={() => onOpenSystem(c.sysId)}><Sigil name="gear" size={13} /> Manage System</button>
         <button className="a-btn a-btn-ghost a-btn-sm" onClick={() => { onArchive(c); }}><Sigil name="archive" size={13} /> {c.status === "active" ? "Archive" : "Restore"}</button>
-        <button className="a-btn a-btn-danger a-btn-sm" onClick={() => { if (confirm("Delete “" + c.title + "”? This removes it from the launcher (mockup only).")) { onDelete(c); onClose(); } }}><Sigil name="trash" size={13} /> Delete</button>
+        <button className="a-btn a-btn-danger a-btn-sm" onClick={() => { if (confirm("Delete “" + c.title + "”? This removes the world AND its local save. This cannot be undone.")) { onDelete(c); onClose(); } }}><Sigil name="trash" size={13} /> Delete</button>
       </div>
     </Modal>
   );
@@ -365,8 +365,11 @@ const NewCampaignWizard = ({ open, systems, initialSysId, onClose, onCreate }) =
       // New worlds run on the shared campaign engine, opened under their own
       // save namespace (passed on the URL) so each starts blank & independent.
       real: "campaigns/The Shattered Isles/The Shattered Isles - My Campaign.html",
-      // Its own localStorage namespace, so its live save never collides with other worlds.
-      ns: "si_" + name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") + "::",
+      // Its own localStorage namespace. The random suffix keeps two worlds with
+      // the same name — or a re-created world after a delete — from ever sharing
+      // (or resurrecting) a save.
+      ns: "si_" + ((name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "")) || "world")
+          + "_" + Math.random().toString(36).slice(2, 8) + "::",
       cover: { sigil, tint: COVER_TINTS[tintIdx] },
     });
   };
@@ -459,8 +462,26 @@ const CampaignsTab = ({ store, api, onLaunch, onOpenSystem, onHost, seedSysId, o
 
   const update = (id, patch) => api.setCampaigns(cs => cs.map(c => c.id === id ? { ...c, ...patch } : c));
   const archive = (c) => { update(c.id, { status: c.status === "active" ? "archived" : "active" }); setDetail(d => d && d.id === c.id ? { ...d, status: c.status === "active" ? "archived" : "active" } : d); };
-  const remove = (c) => api.setCampaigns(cs => cs.filter(x => x.id !== c.id));
-  const duplicate = (c) => api.setCampaigns(cs => [{ ...JSON.parse(JSON.stringify(c)), id: uid("camp"), title: c.title + " (copy)", lastPlayed: "Never", lastPlayedSort: -1, sessions: 0, status: "active" }, ...cs]);
+  const remove = (c) => {
+    // Delete the world's live save with it (never the canonical campaign's) so a
+    // future world that happens to reuse the name doesn't inherit this one's data.
+    try {
+      if (c.ns && c.ns !== "siCampaign::") {
+        const doomed = [];
+        for (let i = 0; i < localStorage.length; i++) {
+          const k = localStorage.key(i);
+          if (k && k.indexOf(c.ns) === 0) doomed.push(k);
+        }
+        doomed.forEach(k => localStorage.removeItem(k));
+      }
+    } catch (e) {}
+    api.setCampaigns(cs => cs.filter(x => x.id !== c.id));
+  };
+  // A duplicate gets its OWN namespace — copying the ns would make both worlds
+  // read and write the same live save.
+  const duplicate = (c) => api.setCampaigns(cs => [{ ...JSON.parse(JSON.stringify(c)), id: uid("camp"), title: c.title + " (copy)",
+    ns: "si_" + ((c.title || "world").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "world") + "-copy_" + Math.random().toString(36).slice(2, 8) + "::",
+    lastPlayed: "Never", lastPlayedSort: -1, sessions: 0, status: "active" }, ...cs]);
 
   const menu = (c) => [
     { label: "Enter campaign", icon: "play", onClick: () => onLaunch(c) },
@@ -471,7 +492,7 @@ const CampaignsTab = ({ store, api, onLaunch, onOpenSystem, onHost, seedSysId, o
     { label: "Duplicate", icon: "copy", onClick: () => duplicate(c) },
     { sep: true },
     { label: c.status === "active" ? "Archive" : "Restore", icon: "archive", onClick: () => archive(c) },
-    { label: "Delete", icon: "trash", danger: true, onClick: () => { if (confirm("Delete “" + c.title + "”? (mockup only)")) remove(c); } },
+    { label: "Delete", icon: "trash", danger: true, onClick: () => { if (confirm("Delete “" + c.title + "”? This removes the world AND its local save. This cannot be undone.")) remove(c); } },
   ];
 
   const counts = {

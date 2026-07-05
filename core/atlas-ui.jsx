@@ -12,13 +12,33 @@ function loadAtlas() {
       if (p && p.campaigns && p.systems) {
         // Migration: backfill each campaign's localStorage namespace (added later) so the
         // roster reads the right live save. Match a persisted campaign to its seed by id,
-        // else derive the namespace from its title the same way new campaigns do.
+        // else derive the namespace from its title the same way new campaigns did.
+        let changed = false;
         p.campaigns.forEach(c => {
           if (c.ns) return;
           const seed = CAMPAIGNS.find(s => s.id === c.id);
           c.ns = (seed && seed.ns) ||
             ("si_" + (c.title || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") + "::");
+          changed = true;
         });
+        // De-collide: name-derived namespaces meant two worlds with the same name
+        // shared one live save (and a re-created world resurrected the old one).
+        // The OLDEST world keeps the namespace (and therefore the existing save);
+        // newer twins are re-namespaced and start fresh. New campaigns now mint
+        // unique namespaces, so this runs at most once per legacy collision.
+        const claimed = new Set();
+        for (let i = p.campaigns.length - 1; i >= 0; i--) { // list is newest-first; walk oldest-first
+          const c = p.campaigns[i];
+          if (!c.ns) continue;
+          if (claimed.has(c.ns)) {
+            c.ns = c.ns.replace(/::$/, "") + "_" + Math.random().toString(36).slice(2, 8) + "::";
+            changed = true;
+          }
+          claimed.add(c.ns);
+        }
+        // Persist immediately — a re-derived or re-minted namespace must survive
+        // the next load, or the campaign would point at a different save each time.
+        if (changed) { try { localStorage.setItem(ATLAS_KEY, JSON.stringify(p)); } catch (e) {} }
         return p;
       }
     }

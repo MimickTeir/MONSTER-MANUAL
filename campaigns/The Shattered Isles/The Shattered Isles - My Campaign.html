@@ -1697,7 +1697,11 @@ function _applySyncedState(jsonText) {
   } catch(e) {}
 }
 window.addEventListener('storage', e => {
-  if (e.key === 'si_state_v2' && e.newValue) _applySyncedState(e.newValue);
+  // Storage events carry the REAL (namespace-prefixed) key — the shim only
+  // wraps get/set. Match this campaign's own save so same-browser tabs of the
+  // SAME world sync instantly, and other worlds' writes are ignored.
+  var myKey = (window.__ATLAS_NS || 'siCampaign::') + 'si_state_v2';
+  if (e.key === myKey && e.newValue) _applySyncedState(e.newValue);
 });
 
 // Is the user actively editing a field right now? If so, a full re-render would
@@ -1705,6 +1709,12 @@ window.addEventListener('storage', e => {
 // re-render until they're done. This is the fix for the intermittent, site-wide
 // "I click a box but can't type in it" bug — a sync re-render was landing mid-edit.
 function _isTyping() {
+  // A held mouse button counts: a re-render mid-click destroys the element
+  // under the cursor, so the click lands on nothing ("it won't let me type").
+  if (_pointerHeld) return true;
+  // An open modal counts too — rebuilding the tab under (or around) a dialog
+  // the user is filling in loses their work.
+  if (document.querySelector('.modal-overlay.active')) return true;
   const el = document.activeElement;
   if (!el || el === document.body) return false;
   const tag = el.tagName;
@@ -1712,6 +1722,10 @@ function _isTyping() {
   if (el.isContentEditable) return true;
   return false;
 }
+let _pointerHeld = false;
+document.addEventListener('pointerdown', () => { _pointerHeld = true; }, true);
+document.addEventListener('pointerup',   () => { _pointerHeld = false; setTimeout(_maybeSyncRender, 0); }, true);
+document.addEventListener('pointercancel', () => { _pointerHeld = false; }, true);
 let _pendingSyncRender = false;
 // Apply a deferred sync re-render — but only when the user isn't mid-edit.
 function _maybeSyncRender() {
@@ -10354,7 +10368,21 @@ function _codexSidebarHtml() {
 
   var locationsBtn = '';
 
-  var typeNav = CODEX_DOC_TYPES.map(function(t) {
+  // The Books archive — every bound volume (imported document) lives here.
+  var _visEntriesForBooks = gmMode ? _cxEntries() : _cxEntries().filter(_loreVisibleToMe);
+  var bookHubCount = _visEntriesForBooks.filter(_cxIsBookHub).length;
+  var regBooks = _codexFilter && _codexFilter.kind === 'books';
+  var booksBtn = (bookHubCount === 0 && !gmMode) ? '' : `<button onclick="_codexSetFilter({kind:'books'})" class="codex-navbtn"
+    style="display:flex;align-items:center;gap:8px;width:100%;padding:6px 9px;border:0;border-radius:4px;
+           background:${regBooks ? 'var(--ink-lift)' : 'transparent'};color:${regBooks ? 'var(--bone)' : 'var(--bone-mid)'};
+           font-family:var(--serif-body);font-size:.86rem;text-align:left;cursor:pointer;position:relative">
+    ${regBooks ? '<span style="position:absolute;left:-13px;top:5px;bottom:5px;width:2px;background:var(--brass-glow);border-radius:0 2px 2px 0"></span>' : ''}
+    <span style="color:var(--brass);flex-shrink:0;font-size:.78rem">📖</span>
+    <span>Books</span>
+    <span style="margin-left:auto;font-family:var(--mono);font-size:.62rem;color:var(--ash)">${bookHubCount}</span>
+  </button>`;
+
+  var typeNavParts = CODEX_DOC_TYPES.map(function(t) {
     var cnt = counts[t.id] || 0;
     // 'faction' type entries are surfaced via the Factions register button below — skip the duplicate.
     if (t.id === 'faction') return '';
@@ -10374,7 +10402,9 @@ function _codexSidebarHtml() {
       ${(gmMode && t.custom) ? `<span onclick="event.stopPropagation();_codexRemoveArchiveType('${t.id}')" title="Remove this archive"
         style="color:var(--ash);cursor:pointer;font-size:.7rem;padding:0 2px">✕</span>` : ''}
     </button>`;
-  }).join('');
+  });
+  // Books slot in right under "All entries".
+  var typeNav = typeNavParts[0] + booksBtn + typeNavParts.slice(1).join('');
 
   var pinnedHtml = '';
   if (pinned.length) {
@@ -10534,8 +10564,11 @@ function _codexLibraryHtml() {
     if (_codexFilter.kind === 'type') {
       var t = CODEX_TYPE_MAP[_codexFilter.id];
       bannerTitle = t ? t.label : _codexFilter.id;
-      bannerSub   = (typeHubs.length ? typeHubs.length + ' book' + (typeHubs.length === 1 ? '' : 's') + (typeLoose.length ? ' · ' : '') : '')
-                  + (typeLoose.length || !typeHubs.length ? typeLoose.length + ' folio' + (typeLoose.length === 1 ? '' : 's') : '');
+      bannerSub   = typeLoose.length + ' folio' + (typeLoose.length === 1 ? '' : 's')
+                  + (typeHubs.length ? ' · ' + typeHubs.length + ' bound volume' + (typeHubs.length === 1 ? '' : 's') + ' shelved under Books' : '');
+    } else if (_codexFilter.kind === 'books') {
+      bannerTitle = '📖 Books';
+      bannerSub   = displayed.length + ' bound volume' + (displayed.length === 1 ? '' : 's') + ' — each opens into its own folios';
     } else if (_codexFilter.kind === 'book') {
       var bkHub = _cxEntry(_codexFilter.id);
       bannerTitle = bkHub ? '📖 ' + (bkHub.title || 'Book') : 'Book';
@@ -10544,10 +10577,9 @@ function _codexLibraryHtml() {
         bannerExtra = `<button onclick="_codexOpenEntry('${bkHub.id}')" style="background:linear-gradient(180deg,var(--brass-glow),var(--brass-deep));
               color:var(--ink-abyss);border:0;padding:6px 12px;border-radius:3px;font-family:var(--serif-sc);text-transform:uppercase;
               letter-spacing:.16em;font-size:.6rem;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:5px">Read the cover folio</button>`;
-        var bkT = CODEX_TYPE_MAP[bkHub.type];
-        if (bkT) bannerExtra += `<button onclick="_codexSetFilter({kind:'type',id:'${bkHub.type}'})" style="background:transparent;border:1px solid var(--ink-edge);color:var(--bone-mid);
+        bannerExtra += `<button onclick="_codexSetFilter({kind:'books'})" style="background:transparent;border:1px solid var(--ink-edge);color:var(--bone-mid);
               padding:6px 12px;border-radius:3px;font-family:var(--serif-sc);text-transform:uppercase;letter-spacing:.16em;
-              font-size:.6rem;cursor:pointer;display:flex;align-items:center;gap:5px">← ${_escHtml(bkT.label)}</button>`;
+              font-size:.6rem;cursor:pointer;display:flex;align-items:center;gap:5px">← Books</button>`;
       }
     } else if (_codexFilter.kind === 'collection') {
       var c = _cxCollections().find(function(x) { return x.id === _codexFilter.id; });
@@ -10628,11 +10660,19 @@ function _codexLibraryHtml() {
       ? _codexShelvesHtml(displayed, { noArchiveBtn: true, noCap: true })
       : `<div style="padding:40px 20px;text-align:center;font-family:var(--serif-display);font-style:italic;font-size:1.1rem;color:var(--ash)">
            ${gmMode ? 'This book has no folios bound inside it.' : 'Nothing in this book has been revealed.'}</div>`;
-  } else if (_codexFilter && _codexFilter.kind === 'type' && (typeHubs.length || typeLoose.length)) {
+  } else if (_codexFilter && _codexFilter.kind === 'books') {
+    gridHtml = displayed.length ? `
+    <div style="margin-bottom:8px">
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px">
+        ${displayed.map(function(h) { return _codexBookCard(h); }).join('')}
+      </div>
+    </div>` : `<div style="padding:40px 20px;text-align:center;font-family:var(--serif-display);font-style:italic;font-size:1.1rem;color:var(--ash)">
+      No books yet — hand the Librarian a document (📎 in its panel) and file it, and the whole import binds into a volume here.</div>`;
+  } else if (_codexFilter && _codexFilter.kind === 'type' && typeLoose.length) {
     gridHtml = `
     <div style="margin-bottom:8px">
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px">
-        ${typeHubs.map(function(h) { return _codexBookCard(h); }).join('')}${typeLoose.map(function(e) { return _codexDocCard(e); }).join('')}
+        ${typeLoose.map(function(e) { return _codexDocCard(e); }).join('')}
       </div>
     </div>`;
   } else if (displayed.length && _codexFilter.kind !== 'type') {
@@ -10682,14 +10722,12 @@ function _codexShelvesHtml(entries, opts) {
   });
 
   function shelf(t, es) {
-    var hubs  = inBookView ? [] : es.filter(_cxIsBookHub);
     var loose = inBookView ? es : es.filter(function(e) { return !_cxIsBookHub(e); });
-    if (!hubs.length && !loose.length) return '';
+    if (!loose.length) return '';
     loose = loose.slice().sort(function(a, b) { return (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0); });
     var shown = t.id ? loose.slice(0, CAP) : loose; // no archive to open for "Unfiled" — show everything
     var more  = loose.length - shown.length;
-    var countLabel = (hubs.length ? hubs.length + ' book' + (hubs.length === 1 ? '' : 's') + (loose.length ? ' · ' : '') : '')
-                   + (loose.length ? loose.length + ' folio' + (loose.length === 1 ? '' : 's') : '');
+    var countLabel = loose.length + ' folio' + (loose.length === 1 ? '' : 's');
     var openBtn = (t.id && !opts.noArchiveBtn) ? `<button onclick="_codexSetFilter({kind:'type',id:'${t.id}'})"
         style="background:transparent;border:1px solid var(--ink-edge);color:var(--bone-mid);padding:4px 11px;border-radius:3px;
                font-family:var(--serif-sc);text-transform:uppercase;letter-spacing:.16em;font-size:.58rem;cursor:pointer;flex-shrink:0"
@@ -10707,7 +10745,7 @@ function _codexShelvesHtml(entries, opts) {
       </div>
       <div style="height:2px;background:linear-gradient(90deg,var(--brass-deep) 0%,rgba(139,106,47,.25) 55%,transparent);border-radius:1px;margin-bottom:14px"></div>
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px">
-        ${hubs.map(function(h) { return _codexBookCard(h); }).join('')}${shown.map(function(e) { return _codexDocCard(e); }).join('')}
+        ${shown.map(function(e) { return _codexDocCard(e); }).join('')}
       </div>
       ${more > 0 ? `<button onclick="_codexSetFilter({kind:'type',id:'${t.id}'})"
         style="margin-top:10px;width:100%;padding:8px;background:transparent;border:1px dashed var(--ink-edge);border-radius:4px;
@@ -10717,7 +10755,42 @@ function _codexShelvesHtml(entries, opts) {
     </div>`;
   }
 
-  var html = CODEX_DOC_TYPES.map(function(t) {
+  // The Books shelf comes first — every bound volume, whatever its genre.
+  var booksShelfHtml = '';
+  if (!inBookView) {
+    var hubsAll = shelfable.filter(_cxIsBookHub)
+      .sort(function(a, b) { return (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0); });
+    if (hubsAll.length) {
+      var hubsShown = hubsAll.slice(0, CAP);
+      var hubsMore  = hubsAll.length - hubsShown.length;
+      booksShelfHtml = `
+      <div style="margin-bottom:36px">
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:2px">
+          <h3 style="font-family:var(--serif-display);font-weight:400;font-size:1.15rem;color:var(--bone);margin:0;display:flex;align-items:center;gap:9px">
+            <span style="font-size:.95rem">📖</span>Books
+          </h3>
+          <span style="font-family:var(--mono);font-size:.62rem;color:var(--ash)">${hubsAll.length} volume${hubsAll.length === 1 ? '' : 's'}</span>
+          <span style="flex:1"></span>
+          <button onclick="_codexSetFilter({kind:'books'})"
+            style="background:transparent;border:1px solid var(--ink-edge);color:var(--bone-mid);padding:4px 11px;border-radius:3px;
+                   font-family:var(--serif-sc);text-transform:uppercase;letter-spacing:.16em;font-size:.58rem;cursor:pointer;flex-shrink:0"
+            onmouseover="this.style.color='var(--brass-glow)';this.style.borderColor='var(--brass-deep)'"
+            onmouseout="this.style.color='var(--bone-mid)';this.style.borderColor='var(--ink-edge)'">Open archive →</button>
+        </div>
+        <div style="height:2px;background:linear-gradient(90deg,var(--brass-deep) 0%,rgba(139,106,47,.25) 55%,transparent);border-radius:1px;margin-bottom:14px"></div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px">
+          ${hubsShown.map(function(h) { return _codexBookCard(h); }).join('')}
+        </div>
+        ${hubsMore > 0 ? `<button onclick="_codexSetFilter({kind:'books'})"
+          style="margin-top:10px;width:100%;padding:8px;background:transparent;border:1px dashed var(--ink-edge);border-radius:4px;
+                 color:var(--bone-mid);font-family:var(--serif-body);font-style:italic;font-size:.82rem;cursor:pointer"
+          onmouseover="this.style.color='var(--brass-glow)';this.style.borderColor='var(--brass-deep)'"
+          onmouseout="this.style.color='var(--bone-mid)';this.style.borderColor='var(--ink-edge)'">…and ${hubsMore} more volumes — open the Books archive</button>` : ''}
+      </div>`;
+    }
+  }
+
+  var html = booksShelfHtml + CODEX_DOC_TYPES.map(function(t) {
     if (t.id === 'all') return '';
     return shelf(t, shelfable.filter(function(e) { return e.type === t.id; }));
   }).join('');
@@ -11875,6 +11948,7 @@ function _codexApplyFilter(entries) {
   if (f.kind === 'type')       return entries.filter(function(e) { return e.type === f.id; }).sort(function(a,b){return a.title.localeCompare(b.title);});
   if (f.kind === 'collection') return entries.filter(function(e) { return (e.collections||[]).includes(f.id); }).sort(function(a,b){return a.title.localeCompare(b.title);});
   if (f.kind === 'book')       return entries.filter(function(e) { return e.bookId === f.id && e.id !== f.id; }).sort(function(a,b){return a.title.localeCompare(b.title);});
+  if (f.kind === 'books')      return entries.filter(_cxIsBookHub).sort(function(a,b){return a.title.localeCompare(b.title);});
   if (f.kind === 'pinned')     { var p = _cxPinned(); return p.map(function(id){ return entries.find(function(e){return e.id===id;});}).filter(Boolean); }
   if (f.kind === 'recent')     { var r = _cxRecent(); return r.map(function(x){ return entries.find(function(e){return e.id===x.id;});}).filter(Boolean); }
   return entries;
