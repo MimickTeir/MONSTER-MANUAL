@@ -1407,10 +1407,21 @@
     const idMap = {};
     entries.forEach((e) => { idMap[e._key] = commitDraft(e); });
     entries.forEach((e) => { if (e.parent && idMap[e.parent] && idMap[e._key]) _linkRelated(idMap[e._key], idMap[e.parent]); });
+    // Bind the whole import into a "book": the hub folio is the cover and every
+    // filed folio a page (e.bookId names the hub; the hub's bookId is itself).
+    // The codex shelves a book as a single volume and opens it into its own view.
+    const main = entries.find((e) => e.role === "main") || entries[0];
+    const mainId = main ? idMap[main._key] : null;
+    if (mainId) {
+      entries.forEach((e) => {
+        const id = idMap[e._key];
+        const rec = id && s.loreEntries.find((x) => x.id === id);
+        if (rec) rec.bookId = mainId;
+      });
+    }
     persist();
     try { if (onLoreTab() && typeof renderLore === "function") renderLore(); } catch (e) {}
-    const main = entries.find((e) => e.role === "main") || entries[0];
-    return { count: entries.length, mainId: main ? idMap[main._key] : null };
+    return { count: entries.length, mainId: mainId };
   }
 
   function appendImportCard(imp) {
