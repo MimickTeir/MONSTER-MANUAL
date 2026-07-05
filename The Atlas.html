@@ -4,6 +4,19 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>The Atlas — Campaign Launcher</title>
+<script>
+/* Electron leaves the window unable to take keystrokes after a native
+   alert()/confirm() closes (electron#20400) — "I clicked something and now I
+   can't type". Wrap both: after each dialog, the preload bridge asks main to
+   blur+refocus the window, which resets Chromium's focus state. No-op in
+   ordinary browsers (no bridge). */
+(function(){try{
+  if(!window.atlasBridge||!window.atlasBridge.fixFocus)return;
+  var _a=window.alert,_c=window.confirm;
+  window.alert=function(m){var r=_a.call(window,m);try{window.atlasBridge.fixFocus();}catch(e){}return r;};
+  window.confirm=function(m){var r=_c.call(window,m);try{window.atlasBridge.fixFocus();}catch(e){}return r;};
+}catch(e){}})();
+</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700;900&family=Crimson+Text:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">

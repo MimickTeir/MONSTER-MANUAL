@@ -175,11 +175,21 @@ function lanIp() {
 // Expose host info to the renderer (host panel builds the share link from this).
 ipcMain.handle('atlas-host-info', () => ({ ip: lanIp(), port: ACTUAL_PORT, build: BUILD }));
 
+// After a native alert()/confirm() the renderer widget is left unfocused
+// (electron#20400) — typing dies until the window is refocused. The pages call
+// this (via preload) right after each dialog; a blur+focus cycle resets it.
+ipcMain.handle('atlas-fix-focus', (e) => {
+  try {
+    const win = BrowserWindow.fromWebContents(e.sender);
+    if (win && !win.isDestroyed()) { win.blur(); win.focus(); win.webContents.focus(); }
+  } catch (err) {}
+});
+
 function createWindow() {
   const win = new BrowserWindow({
     width: 1440, height: 900, minWidth: 1024, minHeight: 680,
     backgroundColor: '#0d0b14', title: 'The Atlas', autoHideMenuBar: true,
-    webPreferences: { contextIsolation: true, nodeIntegration: false },
+    webPreferences: { contextIsolation: true, nodeIntegration: false, preload: path.join(__dirname, 'preload.js') },
   });
   win.loadURL(`${ORIGIN}/The%20Atlas.html`);
   win.webContents.setWindowOpenHandler(({ url }) => {
