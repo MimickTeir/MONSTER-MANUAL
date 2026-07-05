@@ -9,11 +9,12 @@
 // Both transports serve a shared /api/state endpoint backed by per-campaign files in
 // userData, so the DM (app://) and players (http://<lan-ip>:PORT) stay in sync.
 
-const { app, BrowserWindow, protocol, shell, Menu, net, session, ipcMain } = require('electron');
+const { app, BrowserWindow, protocol, shell, Menu, net, session, ipcMain, dialog } = require('electron');
 const http = require('http');
 const os = require('os');
 const fs = require('fs');
 const path = require('path');
+const { exec } = require('child_process');
 const { pathToFileURL } = require('url');
 
 // Bump every build. Injected (from main.js, which the installer always replaces) as a
@@ -185,6 +186,50 @@ ipcMain.handle('atlas-fix-focus', (e) => {
   } catch (err) {}
 });
 
+// Public IP for the host panel's remote (port-forwarded) player link.
+ipcMain.handle('atlas-public-ip', async () => {
+  try {
+    const res = await net.fetch('https://api.ipify.org?format=json', { cache: 'no-store' });
+    if (!res.ok) return null;
+    const j = await res.json();
+    return (j && typeof j.ip === 'string') ? j.ip : null;
+  } catch (e) { return null; }
+});
+
+// ── Windows Firewall ────────────────────────────────────────────────────────
+// Inbound to the game port is blocked unless the app is allowed through the
+// firewall — the #1 reason "players can't join / port forwarding doesn't
+// work". If Windows' own first-run prompt was dismissed (or the network is
+// marked Public), nothing ever asks again. On startup, if our rule is
+// missing, offer to add one (a single UAC consent); "Not now" is remembered.
+function ensureFirewallRule(win) {
+  if (process.platform !== 'win32' || !app.isPackaged) return;
+  const RULE = 'The Atlas Game Host';
+  const marker = path.join(app.getPath('userData'), 'firewall-declined');
+  exec('netsh advfirewall firewall show rule name="' + RULE + '"', async (err, stdout) => {
+    try {
+      if (stdout && stdout.indexOf(RULE) !== -1) return;         // rule already present
+      if (fs.existsSync(marker)) return;                          // user said "Not now"
+      const { response } = await dialog.showMessageBox(win, {
+        type: 'question',
+        buttons: ['Allow connections', 'Not now'],
+        defaultId: 0, cancelId: 1,
+        title: 'Let players reach your table',
+        message: 'Allow The Atlas through Windows Firewall?',
+        detail: 'Players on your network — and remote players you port-forward for — connect to this PC on port ' + ACTUAL_PORT + '. ' +
+                'Windows is currently free to block those connections. Click Allow and approve the one-time administrator prompt to add the firewall rule.',
+      });
+      if (response !== 0) { try { fs.writeFileSync(marker, 'declined'); } catch (e2) {} return; }
+      const bat = path.join(app.getPath('userData'), 'atlas-firewall.bat');
+      fs.writeFileSync(bat,
+        '@echo off\r\n' +
+        'netsh advfirewall firewall delete rule name="' + RULE + '" >nul 2>&1\r\n' +
+        'netsh advfirewall firewall add rule name="' + RULE + '" dir=in action=allow program="' + process.execPath + '" enable=yes profile=any\r\n');
+      exec('powershell -NoProfile -Command "Start-Process -FilePath \'' + bat.replace(/'/g, "''") + '\' -Verb RunAs -WindowStyle Hidden"');
+    } catch (e3) {}
+  });
+}
+
 function createWindow() {
   const win = new BrowserWindow({
     width: 1440, height: 900, minWidth: 1024, minHeight: 680,
@@ -205,7 +250,8 @@ app.whenReady().then(async () => {
   try { await session.defaultSession.clearCache(); } catch (e) {}
   registerProtocol();
   await startHttpServer();          // players can now join at http://<lan-ip>:ACTUAL_PORT
-  createWindow();
+  const mainWin = createWindow();
+  ensureFirewallRule(mainWin);
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });
 

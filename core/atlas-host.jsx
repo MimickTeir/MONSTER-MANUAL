@@ -619,6 +619,18 @@ const HostModal = ({ campaign, hasHost, onGetHost, onClose }) => {
   const [addr, setAddr] = React.useState(auto ? ("http://" + auto.ip + ":" + auto.port) : "http://192.168.1.20:30000");
   const [copied, setCopied] = React.useState("");
   const [savedPage, setSavedPage] = React.useState(false);
+  // Public IP → the remote (port-forwarded) player link. Fetched via the desktop
+  // bridge; stays null in a plain browser or offline.
+  const [pubIp, setPubIp] = React.useState(null);
+  React.useEffect(() => {
+    let live = true;
+    try {
+      if (window.atlasBridge && window.atlasBridge.publicIp) {
+        window.atlasBridge.publicIp().then(ip => { if (live && ip) setPubIp(ip); }).catch(() => {});
+      }
+    } catch (e) {}
+    return () => { live = false; };
+  }, []);
   if (!campaign) return null;
 
   const file = campaign.real || (campaign.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") + ".html");
@@ -627,6 +639,8 @@ const HostModal = ({ campaign, hasHost, onGetHost, onClose }) => {
   // #join → the player picks who they are on a join screen (without it the campaign
   // would open as the GM). ?ns keeps each campaign's shared state separate.
   const joinUrl = base + "/" + encodeURI(file) + (ns ? ("?ns=" + encodeURIComponent(ns)) : "") + "#join";
+  const port = (auto && auto.port) || (addr.match(/:(\d+)/) || [])[1] || "30000";
+  const remoteUrl = pubIp ? ("http://" + pubIp + ":" + port + "/" + encodeURI(file) + (ns ? ("?ns=" + encodeURIComponent(ns)) : "") + "#join") : null;
   const joinFile = campaign.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") + "-invite.html";
 
   const copy = (txt, key) => { copyText(txt).then(ok => { setCopied(ok ? key : "fail"); setTimeout(() => setCopied(""), 1500); }); };
@@ -649,13 +663,32 @@ const HostModal = ({ campaign, hasHost, onGetHost, onClose }) => {
         </Field>
 
         {/* player link */}
-        <Field label="Player join link" hint="Same Wi‑Fi → opens the join screen, then straight into this campaign.">
+        <Field label="Player join link (same Wi‑Fi)" hint="Same Wi‑Fi → opens the join screen, then straight into this campaign.">
           <div style={{ display: "flex", gap: 8 }}>
             <input className="a-input a-mono" style={{ fontSize: "0.74rem" }} readOnly value={joinUrl} onFocus={e => e.target.select()} onClick={e => e.target.select()} />
             <button className="a-btn a-btn-primary a-btn-sm" onClick={() => copy(joinUrl, "url")}>
               <Sigil name={copied === "url" ? "check" : copied === "fail" ? "close" : "copy"} size={13} /> {copied === "url" ? "Copied" : copied === "fail" ? "Select & ⌘C" : "Copy"}
             </button>
           </div>
+        </Field>
+
+        {/* remote (port-forwarded) link */}
+        <Field label="Remote player link (over the internet)"
+          hint={remoteUrl
+            ? ("Give this to players who aren't on your network. Requires forwarding TCP port " + port + " on your router to this PC — and Windows Firewall allowed (The Atlas asks on startup).")
+            : ("Forward TCP port " + port + " on your router to this PC, then share the same link with your PUBLIC IP in place of the local address (search “what is my IP”). Shown automatically when the desktop app can reach the internet.")}>
+          {remoteUrl ? (
+            <div style={{ display: "flex", gap: 8 }}>
+              <input className="a-input a-mono" style={{ fontSize: "0.74rem" }} readOnly value={remoteUrl} onFocus={e => e.target.select()} onClick={e => e.target.select()} />
+              <button className="a-btn a-btn-primary a-btn-sm" onClick={() => copy(remoteUrl, "rurl")}>
+                <Sigil name={copied === "rurl" ? "check" : copied === "fail" ? "close" : "copy"} size={13} /> {copied === "rurl" ? "Copied" : copied === "fail" ? "Select & ⌘C" : "Copy"}
+              </button>
+            </div>
+          ) : (
+            <div className="a-mono" style={{ fontSize: "0.7rem", color: "var(--muted)", padding: "8px 10px", border: "1px dashed var(--border)", borderRadius: "var(--r2)" }}>
+              Public address unavailable right now (offline, or running outside the desktop app).
+            </div>
+          )}
         </Field>
 
         {/* real downloadable join page */}

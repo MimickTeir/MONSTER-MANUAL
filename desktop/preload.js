@@ -8,4 +8,6 @@
 const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('atlasBridge', {
   fixFocus: () => ipcRenderer.invoke('atlas-fix-focus'),
+  // Public IP for the host panel's remote (port-forwarded) player link.
+  publicIp: () => ipcRenderer.invoke('atlas-public-ip'),
 });
