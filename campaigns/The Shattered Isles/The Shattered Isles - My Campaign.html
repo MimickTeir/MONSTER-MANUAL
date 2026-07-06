@@ -10584,6 +10584,9 @@ function _codexLibraryHtml() {
     } else if (_codexFilter.kind === 'books') {
       bannerTitle = '📖 Books';
       bannerSub   = displayed.length + ' bound volume' + (displayed.length === 1 ? '' : 's') + ' — each opens into its own folios';
+      if (gmMode) bannerExtra = `<button onclick="_codexOpenComposer({newBook:true})" style="background:linear-gradient(180deg,var(--brass-glow),var(--brass-deep));
+              color:var(--ink-abyss);border:0;padding:6px 12px;border-radius:3px;font-family:var(--serif-sc);text-transform:uppercase;
+              letter-spacing:.16em;font-size:.6rem;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:5px">＋ New book</button>`;
     } else if (_codexFilter.kind === 'book') {
       var bkHub = _cxEntry(_codexFilter.id);
       bannerTitle = bkHub ? '📖 ' + (bkHub.title || 'Book') : 'Book';
@@ -10684,8 +10687,13 @@ function _codexLibraryHtml() {
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px">
         ${displayed.map(function(h) { return _codexBookCard(h); }).join('')}
       </div>
-    </div>` : `<div style="padding:40px 20px;text-align:center;font-family:var(--serif-display);font-style:italic;font-size:1.1rem;color:var(--ash)">
-      No books yet — hand the Librarian a document (📎 in its panel) and file it, and the whole import binds into a volume here.</div>`;
+    </div>` : `<div style="padding:40px 20px;text-align:center">
+      <div style="font-family:var(--serif-display);font-style:italic;font-size:1.1rem;color:var(--ash);margin-bottom:12px">
+        No books yet — start one yourself, or hand the Librarian a document (📎 in its panel) and the whole import binds into a volume here.</div>
+      ${gmMode ? `<button onclick="_codexOpenComposer({newBook:true})" style="background:linear-gradient(180deg,var(--brass-glow),var(--brass-deep));
+          color:var(--ink-abyss);border:0;padding:8px 18px;border-radius:3px;font-family:var(--serif-sc);text-transform:uppercase;
+          letter-spacing:.18em;font-size:.62rem;font-weight:600;cursor:pointer">📖 Start a new book</button>` : ''}
+    </div>`;
   } else if (_codexFilter && _codexFilter.kind === 'type' && typeLoose.length) {
     gridHtml = `
     <div style="margin-bottom:8px">
@@ -10789,6 +10797,9 @@ function _codexShelvesHtml(entries, opts) {
           </h3>
           <span style="font-family:var(--mono);font-size:.62rem;color:var(--ash)">${hubsAll.length} volume${hubsAll.length === 1 ? '' : 's'}</span>
           <span style="flex:1"></span>
+          ${gmMode ? `<button onclick="_codexOpenComposer({newBook:true})"
+            style="background:transparent;border:1px solid var(--brass-deep);color:var(--brass-glow);padding:4px 11px;border-radius:3px;
+                   font-family:var(--serif-sc);text-transform:uppercase;letter-spacing:.16em;font-size:.58rem;cursor:pointer;flex-shrink:0">＋ New book</button>` : ''}
           <button onclick="_codexSetFilter({kind:'books'})"
             style="background:transparent;border:1px solid var(--ink-edge);color:var(--bone-mid);padding:4px 11px;border-radius:3px;
                    font-family:var(--serif-sc);text-transform:uppercase;letter-spacing:.16em;font-size:.58rem;cursor:pointer;flex-shrink:0"
@@ -11189,23 +11200,35 @@ function _codexReaderHtml(e) {
           </select>
         </div>` : _codexMetaItem('Type', e.typeLabel || t.label)}
         ${(function() {
+          var selStyle = `font-family:var(--serif-body);font-size:.82rem;color:var(--ink-script);background:rgba(95,71,32,.08);
+                       border:1px solid rgba(95,71,32,.3);border-radius:3px;padding:2px 5px;outline:none;cursor:pointer;max-width:220px`;
+          if (_codexEditMode) {
+            if (_cxIsBookHub(e)) {
+              var pages = _cxBookMembers(e.id).length;
+              return `<div style="display:flex;flex-direction:column;gap:1px;min-width:70px">
+                <span style="font-family:var(--serif-sc);text-transform:uppercase;letter-spacing:.18em;font-size:.58rem;color:var(--ink-margin)">Book</span>
+                <select id="codex-book-select" style="${selStyle}">
+                  <option value="__cover__" selected>📖 Book cover (${pages} folio${pages === 1 ? '' : 's'} bound)</option>
+                  <option value="__dissolve__">✂ Dissolve this book — release its folios</option>
+                </select>
+              </div>`;
+            }
+            var hubs = _cxEntries().filter(_cxIsBookHub);
+            return `<div style="display:flex;flex-direction:column;gap:1px;min-width:70px">
+              <span style="font-family:var(--serif-sc);text-transform:uppercase;letter-spacing:.18em;font-size:.58rem;color:var(--ink-margin)">Book</span>
+              <select id="codex-book-select" style="${selStyle}">
+                <option value="">— loose on the shelf —</option>
+                <option value="__self__">★ Make this folio a book cover</option>
+                ${hubs.map(function(h) { return `<option value="${h.id}" ${h.id === e.bookId ? 'selected' : ''}>📖 ${_escHtml(h.title)}</option>`; }).join('')}
+              </select>
+            </div>`;
+          }
           if (_cxIsBookHub(e)) {
             return `<div style="display:flex;flex-direction:column;gap:1px;min-width:70px">
               <span style="font-family:var(--serif-sc);text-transform:uppercase;letter-spacing:.18em;font-size:.58rem;color:var(--ink-margin)">Book</span>
-              <span style="font-family:var(--serif-body);font-size:.82rem;color:var(--ink-faded)">📖 This folio is a book's cover</span>
-            </div>`;
-          }
-          if (_codexEditMode) {
-            var hubs = _cxEntries().filter(_cxIsBookHub);
-            if (!hubs.length) return '';
-            return `<div style="display:flex;flex-direction:column;gap:1px;min-width:70px">
-              <span style="font-family:var(--serif-sc);text-transform:uppercase;letter-spacing:.18em;font-size:.58rem;color:var(--ink-margin)">Book</span>
-              <select id="codex-book-select"
+              <button onclick="_codexSetFilter({kind:'book',id:'${e.id}'})" title="Open this book"
                 style="font-family:var(--serif-body);font-size:.82rem;color:var(--ink-script);background:rgba(95,71,32,.08);
-                       border:1px solid rgba(95,71,32,.3);border-radius:3px;padding:2px 5px;outline:none;cursor:pointer;max-width:220px">
-                <option value="">— loose on the shelf —</option>
-                ${hubs.map(function(h) { return `<option value="${h.id}" ${h.id === e.bookId ? 'selected' : ''}>📖 ${_escHtml(h.title)}</option>`; }).join('')}
-              </select>
+                       border:1px solid rgba(95,71,32,.3);border-radius:3px;padding:1px 7px;cursor:pointer;text-align:left">📖 This folio is a book's cover — open it</button>
             </div>`;
           }
           var hb = _cxIsBookMember(e) ? _cxEntry(e.bookId) : null;
@@ -11567,15 +11590,15 @@ function _codexOpenComposer(opts) {
       </div>
       ${(function() {
         var hubs = _cxEntries().filter(_cxIsBookHub);
-        if (!hubs.length) return '';
-        var pre = opts.bookId || '';
+        var pre = opts.bookId || (opts.newBook ? '__newbook__' : '');
         return `<div>
-          <label style="font-family:var(--serif-sc);text-transform:uppercase;letter-spacing:.2em;font-size:.6rem;color:var(--ash);display:block;margin-bottom:5px">Bind into a book (optional)</label>
+          <label style="font-family:var(--serif-sc);text-transform:uppercase;letter-spacing:.2em;font-size:.6rem;color:var(--ash);display:block;margin-bottom:5px">Book</label>
           <select id="codex-c-book"
             style="width:100%;box-sizing:border-box;background:var(--ink-lift);border:1px solid var(--ink-edge);
                    color:var(--bone);padding:9px 11px;border-radius:4px;font-family:var(--serif-body);font-size:.88rem;outline:none;cursor:pointer">
             <option value="">— loose on the shelf —</option>
-            ${hubs.map(function(h) { return `<option value="${h.id}" ${h.id === pre ? 'selected' : ''}>📖 ${_escHtml(h.title)}</option>`; }).join('')}
+            <option value="__newbook__" ${pre === '__newbook__' ? 'selected' : ''}>★ Start a NEW book — this folio becomes its cover</option>
+            ${hubs.map(function(h) { return `<option value="${h.id}" ${h.id === pre ? 'selected' : ''}>📖 Bind into: ${_escHtml(h.title)}</option>`; }).join('')}
           </select>
         </div>`;
       })()}
@@ -11776,9 +11799,12 @@ function _codexComposerSubmit() {
     var parType  = par ? (par.type || '') : '';
     entry.related.push({ id: parentId, title: parTitle, type: parType });
   }
-  // Bind into a book, if one was chosen — cross-link both ways like an import.
+  // Book binding — a brand-new book (this folio as cover), or bind into an
+  // existing one (cross-links both ways like an import).
   var bookSel = document.getElementById('codex-c-book');
-  if (bookSel && bookSel.value) {
+  if (bookSel && bookSel.value === '__newbook__') {
+    entry.bookId = entry.id; // its own cover — pages get bound to it later
+  } else if (bookSel && bookSel.value) {
     var bkHub = _cxEntry(bookSel.value);
     if (bkHub && _cxIsBookHub(bkHub)) {
       entry.bookId = bkHub.id;
@@ -11953,20 +11979,30 @@ function _codexSaveEdits() {
     if (e.type === 'char' && !e.npcRel) e.npcRel = 'unknown';
   }
 
-  // Book binding — bind into (or release from) a book; binding cross-links both ways.
+  // Book binding — become a cover, dissolve a book, bind into one, or release.
   var bookSel = document.getElementById('codex-book-select');
-  if (bookSel && !_cxIsBookHub(e) && (e.bookId || '') !== bookSel.value) {
-    if (bookSel.value) {
-      var bHub = _cxEntry(bookSel.value);
-      if (bHub && _cxIsBookHub(bHub)) {
-        e.bookId = bHub.id;
-        if (!Array.isArray(bHub.related)) bHub.related = [];
-        if (!Array.isArray(e.related)) e.related = [];
-        if (!bHub.related.some(function(r) { return r.id === e.id; })) bHub.related.push({ id: e.id, title: e.title, type: e.type });
-        if (!e.related.some(function(r) { return r.id === bHub.id; })) e.related.push({ id: bHub.id, title: bHub.title, type: bHub.type });
+  if (bookSel) {
+    if (_cxIsBookHub(e)) {
+      if (bookSel.value === '__dissolve__' &&
+          confirm('Dissolve “' + (e.title || 'this book') + '”? Its folios return to the open shelves (nothing is deleted).')) {
+        _cxEntries().forEach(function(m) { if (m.bookId === e.id && m.id !== e.id) delete m.bookId; });
+        delete e.bookId;
       }
-    } else {
-      delete e.bookId; // back onto the open shelves
+    } else if (bookSel.value === '__self__') {
+      e.bookId = e.id; // this folio becomes a new book's cover
+    } else if ((e.bookId || '') !== bookSel.value) {
+      if (bookSel.value) {
+        var bHub = _cxEntry(bookSel.value);
+        if (bHub && _cxIsBookHub(bHub)) {
+          e.bookId = bHub.id;
+          if (!Array.isArray(bHub.related)) bHub.related = [];
+          if (!Array.isArray(e.related)) e.related = [];
+          if (!bHub.related.some(function(r) { return r.id === e.id; })) bHub.related.push({ id: e.id, title: e.title, type: e.type });
+          if (!e.related.some(function(r) { return r.id === bHub.id; })) e.related.push({ id: bHub.id, title: bHub.title, type: bHub.type });
+        }
+      } else {
+        delete e.bookId; // back onto the open shelves
+      }
     }
   }
 
