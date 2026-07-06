@@ -2169,15 +2169,15 @@ function initUserSystem() {
     try {
       const data = JSON.parse(atob(hash.slice(6)));
       handleInviteLink(data);
-      history.replaceState(null, '', window.location.pathname);
+      history.replaceState(null, '', window.location.pathname + window.location.search);
       return;
     } catch(e) { console.warn('Bad invite link', e); }
-    history.replaceState(null, '', window.location.pathname);
+    history.replaceState(null, '', window.location.pathname + window.location.search);
   }
 
   // Shared join link (#join) — the player chooses who they are. No auto-login.
   if (hash === '#join' || hash.startsWith('#join&') || hash.startsWith('#join?')) {
-    history.replaceState(null, '', window.location.pathname);
+    history.replaceState(null, '', window.location.pathname + window.location.search);
     showJoinScreen();
     return;
   }
@@ -2204,7 +2204,7 @@ function initUserSystem() {
           saveState();
         }
       }
-      history.replaceState(null, '', window.location.pathname);
+      history.replaceState(null, '', window.location.pathname + window.location.search);
       if (u) { loginAs(u.id, true); return; }
     }
   } catch(e) { console.warn('Bad ?as= identity', e); }
@@ -2664,6 +2664,11 @@ function showJoinScreen() {
   overlay.style.display = 'flex';
   _joinPickId = null;
   const players = (state.users || []).filter(u => u.role !== 'dm');
+  // Characters no one has claimed yet — a joiner can pick "who they're
+  // supposed to be" even when the GM never added people to the roster.
+  const unclaimed = (state.party || [])
+    .map(function(p, i) { return { p: p, i: i }; })
+    .filter(function(x) { return !x.p.userId && (x.p.name || '').trim(); });
 
   overlay.innerHTML = `
     <div style="text-align:center;max-width:520px;width:100%;padding:2rem 1.5rem">
@@ -2684,7 +2689,22 @@ function showJoinScreen() {
             </div>
           `).join('')}
         </div>
-      ` : `<p style="color:#aaa;margin-bottom:1.4rem;font-size:.9rem">No players yet — be the first to join.</p>`}
+      ` : (unclaimed.length ? '' : `<p style="color:#aaa;margin-bottom:1.4rem;font-size:.9rem">No players yet — be the first to join.</p>`)}
+      ${unclaimed.length ? `
+        <p style="color:#7e745f;margin:0 0 .7rem;font-size:.78rem;text-transform:uppercase;letter-spacing:.16em">${players.length ? 'Or claim your character' : 'Claim your character'}</p>
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:.65rem;margin-bottom:1.4rem">
+          ${unclaimed.map(x => `
+            <div onclick="joinAsCharacter(${x.i})"
+              style="cursor:pointer;padding:.9rem .6rem;background:rgba(201,168,76,0.05);border:2px dashed rgba(201,168,76,.45);border-radius:12px;text-align:center;transition:all .15s"
+              onmouseover="this.style.background='rgba(201,168,76,0.12)';this.style.transform='translateY(-2px)'"
+              onmouseout="this.style.background='rgba(201,168,76,0.05)';this.style.transform=''">
+              <div style="width:44px;height:44px;border-radius:50%;background:rgba(201,168,76,.2);border:1px solid rgba(201,168,76,.4);margin:0 auto .45rem;display:flex;align-items:center;justify-content:center;font-size:1.2rem">🎭</div>
+              <div style="font-weight:600;color:#e8dcc0;font-size:.9rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${(x.p.name||'')}</div>
+              <div style="font-size:.7rem;opacity:.5;margin-top:.1rem">${[(x.p.cls||'').trim(), x.p.level ? 'Lv ' + x.p.level : ''].filter(Boolean).join(' · ') || 'Character'}</div>
+            </div>
+          `).join('')}
+        </div>
+      ` : ''}
       <div id="join-pass-row" style="display:none;max-width:300px;margin:0 auto 1.2rem">
         <input id="join-pass" type="password" placeholder="Password…" onkeydown="if(event.key==='Enter')submitJoinPassword()" style="width:100%;padding:.5rem .6rem;background:rgba(255,255,255,0.08);color:#e0d6ff;border:1px solid rgba(255,255,255,0.25);border-radius:8px;box-sizing:border-box;font-size:.95rem;text-align:center">
         <div style="display:flex;gap:.5rem;margin-top:.5rem">
@@ -2732,6 +2752,28 @@ function cancelJoinPassword() {
 function joinAsNewPlayer() {
   _joinNewMode = true;
   showAddUserModal(false);   // role select defaults to Player; submitAddUser logs them in
+}
+
+// Join by claiming a character from the party — creates (or reuses) a player
+// user, ties the character to them, and logs them straight in.
+function joinAsCharacter(idx) {
+  const ch = (state.party || [])[idx];
+  if (!ch || ch.userId) { showJoinScreen(); return; }
+  _atlasPrompt('You are ' + (ch.name || 'this character') + ' — what is YOUR name, player?', '').then(function(nm) {
+    if (nm == null) return; // cancelled
+    nm = String(nm).trim() || ((ch.name || 'Player') + "'s player");
+    // Same person re-joining from a new device? Reuse their user.
+    let u = (state.users || []).find(x => x.role !== 'dm' && (x.name || '').trim().toLowerCase() === nm.toLowerCase());
+    if (!u) {
+      u = { id: 'u_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6), name: nm, email: '', role: 'player',
+            color: USER_COLORS[(state.users || []).length % USER_COLORS.length], playerIdx: null };
+      state.users = state.users || [];
+      state.users.push(u);
+    }
+    ch.userId = u.id;
+    saveState();
+    loginAs(u.id);
+  });
 }
 
 function attemptGmEntry() {
