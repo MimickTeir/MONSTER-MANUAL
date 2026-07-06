@@ -1795,12 +1795,21 @@ async function loadStateInit() {
         await _pushStateToServer(local);
       }
     } else {
-      // Merge server state, keep our clientUserId
+      // Merge server state, keep our clientUserId. Cancel any push queued
+      // before the merge — it holds a pre-merge snapshot and would clobber
+      // the fresher server state we're about to adopt.
+      clearTimeout(window._saveDebounce);
       const myUserId = state.currentUserId;
       state = Object.assign(JSON.parse(JSON.stringify(DEFAULT_STATE)), data);
       state.currentUserId = myUserId;
       _lastServerHash = _hashStr(text);
       localStorage.setItem('si_state_v2', text);
+      // Re-apply the Atlas-level sync ON TOP of the server state — the
+      // launcher-roster pull ran inside loadState() above and was just
+      // overwritten by this merge, which is why people added to the table
+      // in The Atlas never appeared on the join screen. Re-pulling here
+      // saves (and pushes) them into the shared state.
+      try { if (typeof _atlasSyncOnLoad === 'function') _atlasSyncOnLoad(); } catch (e) {}
     }
   } catch(e) {
     console.warn('[SI] Could not reach state API, using localStorage.');
