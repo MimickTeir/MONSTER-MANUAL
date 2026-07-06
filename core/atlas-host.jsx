@@ -631,6 +631,65 @@ const HostModal = ({ campaign, hasHost, onGetHost, onClose }) => {
     } catch (e) {}
     return () => { live = false; };
   }, []);
+
+  // ── The table this link points at ─────────────────────────────────────
+  // Opening this panel SYNCS the campaign's roster straight into its live
+  // save (and the host's shared state), then shows who's actually on the
+  // join screen — so the link and the player list can never disagree.
+  const [tablePlayers, setTablePlayers] = React.useState(null);
+  const [syncNote, setSyncNote] = React.useState("");
+  const syncRoster = React.useCallback(async () => {
+    if (!campaign || !campaign.ns) return;
+    try {
+      const COLORS = ["#7c6fe0", "#e06f7c", "#6fe08a", "#e0b46f", "#e06fe0", "#6fd4e0", "#c9a84c", "#6fa8e0"];
+      const key = campaign.ns + "si_state_v2";
+      let st = {};
+      try { st = JSON.parse(localStorage.getItem(key)) || {}; } catch (e) { st = {}; }
+      if (!Array.isArray(st.users)) st.users = [];
+      if (!st.users.some(u => u.role === "dm")) st.users.push({ id: "u_dm", name: "Keeper", role: "dm", color: "#c9a84c", playerIdx: null });
+      const roster = (campaign.users || []).filter(u => u && u.role !== "gm" && (u.name || "").trim());
+      const byName = {};
+      st.users.forEach(u => { byName[(u.name || "").trim().toLowerCase()] = u; });
+      const keep = {};
+      roster.forEach(au => {
+        const name = au.name.trim(), k = name.toLowerCase();
+        keep[k] = true;
+        let u = byName[k];
+        if (u && u.role === "dm") return;
+        if (!u) {
+          u = { id: "u_" + Date.now() + "_" + Math.random().toString(36).slice(2, 6), name, email: "", role: "player", color: COLORS[st.users.length % COLORS.length], playerIdx: null };
+          st.users.push(u);
+          byName[k] = u;
+        }
+        const plays = (au.plays || "").trim().toLowerCase();
+        if (plays) {
+          const match = (st.party || []).find(p => (p.name || "").trim().toLowerCase() === plays);
+          if (match) match.userId = u.id;
+        }
+      });
+      if (roster.length) {
+        st.users = st.users.filter(u => {
+          if (u.role === "dm") return true;
+          if (keep[(u.name || "").trim().toLowerCase()]) return true;
+          (st.party || []).forEach(p => { if (p.userId === u.id) p.userId = null; });
+          return false;
+        });
+      }
+      try { localStorage.setItem(key, JSON.stringify(st)); } catch (e) {}
+      try {
+        await fetch("/api/state?ns=" + encodeURIComponent(campaign.ns), {
+          method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(st),
+        });
+      } catch (e) {}
+      const names = st.users.filter(u => u.role !== "dm").map(u => u.name);
+      setTablePlayers(names);
+      setSyncNote(roster.length ? "" : "This campaign's roster is empty — add players in Edit campaign, then reopen this panel.");
+    } catch (e) {
+      setTablePlayers([]);
+      setSyncNote("Could not sync the roster: " + (e && e.message || "unknown error"));
+    }
+  }, [campaign]);
+  React.useEffect(() => { if (campaign) syncRoster(); }, [campaign, syncRoster]);
   if (!campaign) return null;
 
   const file = campaign.real || (campaign.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") + ".html");
@@ -661,6 +720,33 @@ const HostModal = ({ campaign, hasHost, onGetHost, onClose }) => {
         <Field label="Host address" hint={auto ? "Auto-detected from your network — edit only if you use a different address." : "Type the address shown in the corner of The Atlas."}>
           <input className="a-input a-mono" style={{ fontSize: "0.82rem" }} value={addr} onChange={e => setAddr(e.target.value)} placeholder="http://192.168.1.20:30000" />
         </Field>
+
+        {/* who the join screen will offer — synced from the roster the moment this panel opens */}
+        <div style={{ padding: "11px 14px", borderRadius: "var(--r2)", background: "var(--faint)", border: "1px solid var(--border)" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+            <span style={{ color: "var(--gold)" }}><Sigil name="figure" size={14} /></span>
+            <span className="a-mono" style={{ fontSize: "0.62rem", color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.1em" }}>
+              Players on the join screen{tablePlayers ? " · " + tablePlayers.length : ""}
+            </span>
+            <button className="a-btn a-btn-ghost a-btn-sm" style={{ marginLeft: "auto" }} onClick={syncRoster} title="Re-sync from Edit campaign → roster">
+              <Sigil name="swap" size={12} /> Sync roster
+            </button>
+          </div>
+          {tablePlayers === null ? (
+            <div style={{ color: "var(--muted)", fontSize: "0.8rem" }}>Syncing…</div>
+          ) : tablePlayers.length ? (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+              {tablePlayers.map((n, i) => (
+                <span key={n + i} className="a-pill" style={{ background: "var(--gold3)", color: "var(--gold2)", borderColor: "rgba(200,160,80,0.34)" }}>🎭 {n}</span>
+              ))}
+            </div>
+          ) : (
+            <div style={{ color: "#cc8f8f", fontSize: "0.8rem", lineHeight: 1.5 }}>
+              Nobody yet — players you add in <b style={{ color: "var(--bone)" }}>Edit campaign → roster</b> appear here (and on the join screen) as soon as you reopen this panel.
+            </div>
+          )}
+          {syncNote ? <div style={{ color: "#cc8f8f", fontSize: "0.74rem", marginTop: 6, lineHeight: 1.45 }}>{syncNote}</div> : null}
+        </div>
 
         {/* player link */}
         <Field label="Player join link (same Wi‑Fi)" hint="Same Wi‑Fi → opens the join screen, then straight into this campaign.">
