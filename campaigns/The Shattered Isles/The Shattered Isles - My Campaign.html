@@ -1756,6 +1756,15 @@ function _startPolling() {
   _pollTimer = setInterval(async () => {
     const changed = await _pullStateFromServer();
     if (changed) _pendingSyncRender = true;
+    // The join screen renders once at boot — if it's open when a sync lands
+    // (the GM just added players from the Atlas), redraw it live so the new
+    // cards appear without a manual refresh. Skip while the joiner is mid-
+    // password or mid-prompt.
+    if (changed && typeof _joinScreenOpen !== 'undefined' && _joinScreenOpen &&
+        !_joinPickId && !document.getElementById('_apf') &&
+        typeof showJoinScreen === 'function') {
+      try { showJoinScreen(); } catch (e) {}
+    }
     _maybeSyncRender(); // renders now if not typing; otherwise waits for focusout / next poll
     // Handout overlay: check every poll so newly-joined clients and re-pushes always show
     if (typeof _checkHandoutOverlay === 'function') _checkHandoutOverlay();
@@ -2356,6 +2365,7 @@ function loginAs(userId, persist = true) {
   const user = (state.users || []).find(u => u.id === userId);
   if (!user) return;
 
+  if (typeof _joinScreenOpen !== 'undefined') _joinScreenOpen = false;
   state.currentUserId = userId;
   if (persist) localStorage.setItem('si_current_user', userId);
 
@@ -2706,6 +2716,7 @@ function handleInviteLink(data) {
 // ══════════════════════════════════════════════
 let _joinNewMode = false;   // true while a joiner is self-adding from the join link
 let _joinPickId  = null;    // player awaiting a password on the join screen
+let _joinScreenOpen = false; // join screen showing → live-refresh it when synced users change
 
 function joinLink() {
   return window.location.href.split('#')[0] + '#join';
@@ -2721,6 +2732,7 @@ function showJoinScreen() {
   }
   overlay.style.display = 'flex';
   _joinPickId = null;
+  _joinScreenOpen = true;
   // Everyone except the table's primary Keeper is pickable — players AND
   // co-DMs (extra GM seats join here too, with full GM powers).
   const _firstDm = (state.users || []).find(u => u.role === 'dm');

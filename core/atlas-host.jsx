@@ -690,14 +690,28 @@ const HostModal = ({ campaign, hasHost, onGetHost, onClose, onRebindNs }) => {
         });
       }
       try { localStorage.setItem(key, JSON.stringify(st)); } catch (e) {}
+      // Push to the host, then READ IT BACK — the pill list must reflect what
+      // players' devices will actually be served, not just the local write.
+      let served = null;
       try {
-        await fetch("/api/state?ns=" + encodeURIComponent(campaign.ns), {
+        const resp = await fetch("/api/state?ns=" + encodeURIComponent(campaign.ns), {
           method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(st),
         });
-      } catch (e) {}
+        if (!resp.ok) throw new Error("host answered " + resp.status);
+        const back = await (await fetch("/api/state?ns=" + encodeURIComponent(campaign.ns) + "&t=" + Date.now(), { cache: "no-store" })).json();
+        served = Array.isArray(back.users) ? back.users.length : 0;
+      } catch (e) { served = -1; }
       const primaryId = (st.users.find(u => u.role === "dm") || {}).id;
       setTablePlayers(st.users.filter(u => u.id !== primaryId).map(u => ({ name: u.name, dm: u.role === "dm" })));
-      setSyncNote((roster.length || coDms.length) ? "" : "This campaign's roster is empty — add players in Edit campaign, then reopen this panel.");
+      if (served === -1) {
+        setSyncNote("⚠ Could not reach the host to publish this list — players will NOT see it. Is The Atlas app running (it hosts on port 30000)?");
+      } else if (served !== st.users.length) {
+        setSyncNote("⚠ The host answered but is serving " + served + " user(s) instead of " + st.users.length + " — something else may be overwriting the shared state (an old campaign window open somewhere?).");
+      } else {
+        setSyncNote((roster.length || coDms.length)
+          ? "✓ Published — the host is serving all " + st.users.length + " seats. Player screens on the join page update within a couple of seconds."
+          : "This campaign's roster is empty — add players in Edit campaign, then reopen this panel.");
+      }
     } catch (e) {
       setTablePlayers([]);
       setSyncNote("Could not sync the roster: " + (e && e.message || "unknown error"));
@@ -759,7 +773,7 @@ const HostModal = ({ campaign, hasHost, onGetHost, onClose, onRebindNs }) => {
               Nobody yet — players you add in <b style={{ color: "var(--bone)" }}>Edit campaign → roster</b> appear here (and on the join screen) as soon as you reopen this panel.
             </div>
           )}
-          {syncNote ? <div style={{ color: "#cc8f8f", fontSize: "0.74rem", marginTop: 6, lineHeight: 1.45 }}>{syncNote}</div> : null}
+          {syncNote ? <div style={{ color: syncNote.startsWith("✓") ? "#7fc79a" : "#cc8f8f", fontSize: "0.74rem", marginTop: 6, lineHeight: 1.45 }}>{syncNote}</div> : null}
         </div>
 
         {/* which SAVE this link points at — the #1 cause of "players don't show":
