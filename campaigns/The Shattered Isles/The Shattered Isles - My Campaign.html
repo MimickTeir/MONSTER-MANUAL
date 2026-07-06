@@ -2218,12 +2218,24 @@ function initUserSystem() {
     }
   } catch(e) { console.warn('Bad ?as= identity', e); }
 
+  // A browser served by the Atlas host over http(s) is a PLAYER device — the
+  // DM's own window runs on app://. Never auto-enter as the Keeper there:
+  // without #join, a fresh player landed straight in the GM seat (the seed
+  // pre-stores the Keeper as the session user). Show the picker instead —
+  // the GM can still enter via "I'm the Game Master →".
+  const isPlayerDevice = !!window.__ATLAS_HOST && /^https?:$/.test(location.protocol);
+
   // Resume stored session
   const storedId = localStorage.getItem('si_current_user');
   if (storedId) {
     const user = (state.users || []).find(u => u.id === storedId);
-    if (user) { loginAs(user.id, false); return; }
+    if (user) {
+      if (isPlayerDevice && user.role === 'dm') { showJoinScreen(); return; }
+      loginAs(user.id, false); return;
+    }
   }
+
+  if (isPlayerDevice) { showJoinScreen(); return; }
 
   // No switching here — default to the table's Keeper (GM), the campaign owner.
   const fallback = (state.users || []).find(u => u.role === 'dm') || (state.users || [])[0];
