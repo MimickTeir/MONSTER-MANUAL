@@ -613,7 +613,7 @@ const DownloadHostModal = ({ open, onClose, onGet }) => {
 };
 
 // ── Per-campaign host modal — real link + real join page ──────────────
-const HostModal = ({ campaign, hasHost, onGetHost, onClose }) => {
+const HostModal = ({ campaign, hasHost, onGetHost, onClose, onRebindNs }) => {
   // The desktop app is already the host — auto-detect its LAN address (injected by main.js).
   const auto = (typeof window !== "undefined" && window.__ATLAS_HOST) || null;
   const [addr, setAddr] = React.useState(auto ? ("http://" + auto.ip + ":" + auto.port) : "http://192.168.1.20:30000");
@@ -647,7 +647,10 @@ const HostModal = ({ campaign, hasHost, onGetHost, onClose }) => {
       try { st = JSON.parse(localStorage.getItem(key)) || {}; } catch (e) { st = {}; }
       if (!Array.isArray(st.users)) st.users = [];
       if (!st.users.some(u => u.role === "dm")) st.users.push({ id: "u_dm", name: "Keeper", role: "dm", color: "#c9a84c", playerIdx: null });
-      const roster = (campaign.users || []).filter(u => u && u.role !== "gm" && (u.name || "").trim());
+      const rosterAll = (campaign.users || []).filter(u => u && (u.name || "").trim());
+      const roster = rosterAll.filter(u => u.role !== "gm");
+      // Extra GM rows beyond the first are co-DMs — they join with full GM powers.
+      const coDms = rosterAll.filter(u => u.role === "gm").slice(1);
       const byName = {};
       st.users.forEach(u => { byName[(u.name || "").trim().toLowerCase()] = u; });
       const keep = {};
@@ -667,9 +670,20 @@ const HostModal = ({ campaign, hasHost, onGetHost, onClose }) => {
           if (match) match.userId = u.id;
         }
       });
-      if (roster.length) {
+      coDms.forEach(au => {
+        const name = au.name.trim(), k = name.toLowerCase();
+        keep[k] = true;
+        let u = byName[k];
+        if (!u) {
+          u = { id: "u_" + Date.now() + "_" + Math.random().toString(36).slice(2, 6), name, email: "", role: "dm", color: COLORS[st.users.length % COLORS.length], playerIdx: null };
+          st.users.push(u);
+          byName[k] = u;
+        } else if (u.role !== "dm") { u.role = "dm"; }
+      });
+      if (roster.length || coDms.length) {
+        const primaryDmId = (st.users.find(u => u.role === "dm") || {}).id;
         st.users = st.users.filter(u => {
-          if (u.role === "dm") return true;
+          if (u.id === primaryDmId) return true;
           if (keep[(u.name || "").trim().toLowerCase()]) return true;
           (st.party || []).forEach(p => { if (p.userId === u.id) p.userId = null; });
           return false;
@@ -681,9 +695,9 @@ const HostModal = ({ campaign, hasHost, onGetHost, onClose }) => {
           method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(st),
         });
       } catch (e) {}
-      const names = st.users.filter(u => u.role !== "dm").map(u => u.name);
-      setTablePlayers(names);
-      setSyncNote(roster.length ? "" : "This campaign's roster is empty — add players in Edit campaign, then reopen this panel.");
+      const primaryId = (st.users.find(u => u.role === "dm") || {}).id;
+      setTablePlayers(st.users.filter(u => u.id !== primaryId).map(u => ({ name: u.name, dm: u.role === "dm" })));
+      setSyncNote((roster.length || coDms.length) ? "" : "This campaign's roster is empty — add players in Edit campaign, then reopen this panel.");
     } catch (e) {
       setTablePlayers([]);
       setSyncNote("Could not sync the roster: " + (e && e.message || "unknown error"));
@@ -736,8 +750,8 @@ const HostModal = ({ campaign, hasHost, onGetHost, onClose }) => {
             <div style={{ color: "var(--muted)", fontSize: "0.8rem" }}>Syncing…</div>
           ) : tablePlayers.length ? (
             <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-              {tablePlayers.map((n, i) => (
-                <span key={n + i} className="a-pill" style={{ background: "var(--gold3)", color: "var(--gold2)", borderColor: "rgba(200,160,80,0.34)" }}>🎭 {n}</span>
+              {tablePlayers.map((p, i) => (
+                <span key={p.name + i} className="a-pill" style={{ background: "var(--gold3)", color: "var(--gold2)", borderColor: "rgba(200,160,80,0.34)" }}>{p.dm ? "🎲" : "🎭"} {p.name}</span>
               ))}
             </div>
           ) : (
@@ -746,6 +760,50 @@ const HostModal = ({ campaign, hasHost, onGetHost, onClose }) => {
             </div>
           )}
           {syncNote ? <div style={{ color: "#cc8f8f", fontSize: "0.74rem", marginTop: 6, lineHeight: 1.45 }}>{syncNote}</div> : null}
+        </div>
+
+        {/* which SAVE this link points at — the #1 cause of "players don't show":
+            the link/card aims at one namespace while the real game lives in another. */}
+        <div style={{ padding: "10px 14px", borderRadius: "var(--r2)", background: "var(--faint)", border: "1px solid var(--border)" }}>
+          <div className="a-mono" style={{ fontSize: "0.62rem", color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 5 }}>Table save</div>
+          {(() => {
+            const saves = [];
+            try {
+              for (let i = 0; i < localStorage.length; i++) {
+                const k = localStorage.key(i);
+                const m = k && k.match(/^(.*::)si_state_v2$/);
+                if (!m) continue;
+                try {
+                  const st = JSON.parse(localStorage.getItem(k)) || {};
+                  saves.push({ ns: m[1], day: st.day || 1, folios: (st.loreEntries || []).length, players: (st.users || []).filter(u => u.role !== "dm").length });
+                } catch (e) {}
+              }
+            } catch (e) {}
+            const cur = saves.find(s => s.ns === ns);
+            const others = saves.filter(s => s.ns !== ns);
+            return (
+              <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+                <div className="a-mono" style={{ fontSize: "0.7rem", color: "var(--bone)" }}>
+                  {ns || "(none)"} {cur ? <span style={{ color: "var(--muted)" }}> · day {cur.day} · {cur.folios} folios · {cur.players} players</span> : <span style={{ color: "#cc8f8f" }}> · no save yet (fresh world)</span>}
+                </div>
+                {others.length > 0 && onRebindNs ? (
+                  <div style={{ display: "flex", gap: 7, alignItems: "center", flexWrap: "wrap" }}>
+                    <span style={{ color: "var(--muted)", fontSize: "0.74rem" }}>Wrong world showing up? Point this campaign at another save:</span>
+                    <select id="host-rebind-sel" className="a-select" style={{ fontSize: "0.72rem", padding: "4px 26px 4px 8px", maxWidth: 320 }} defaultValue="">
+                      <option value="" disabled>— pick a save —</option>
+                      {others.map(s => (
+                        <option key={s.ns} value={s.ns}>{s.ns} · day {s.day} · {s.folios} folios · {s.players} players</option>
+                      ))}
+                    </select>
+                    <button className="a-btn a-btn-ghost a-btn-sm" onClick={() => {
+                      const sel = document.getElementById("host-rebind-sel");
+                      if (sel && sel.value) onRebindNs(sel.value);
+                    }}><Sigil name="link" size={12} /> Use this save</button>
+                  </div>
+                ) : null}
+              </div>
+            );
+          })()}
         </div>
 
         {/* player link */}

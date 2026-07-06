@@ -168,7 +168,12 @@ const App = () => {
       </main>
 
       {builder && <SystemBuilder system={builder} onSave={saveSystem} onCancel={() => setBuilder(null)} />}
-      <HostModal campaign={hostCampaign} onClose={() => setHostCampaign(null)} />
+      <HostModal campaign={hostCampaign} onClose={() => setHostCampaign(null)}
+        onRebindNs={(ns) => {
+          if (!hostCampaign) return;
+          api.setCampaigns(cs => cs.map(x => x.id === hostCampaign.id ? { ...x, ns } : x));
+          setHostCampaign({ ...hostCampaign, ns });
+        }} />
       <LaunchVeil campaign={launching} onDone={() => setLaunching(null)} />
     </>
   );

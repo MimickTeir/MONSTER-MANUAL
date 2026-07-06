@@ -1891,15 +1891,27 @@ function _atlasPullUsers(){
     if(!launcher || !Array.isArray(launcher.campaigns)) return;
     var camp = launcher.campaigns.find(function(c){ return c.ns === window.__ATLAS_NS; });
     if(!camp || !Array.isArray(camp.users)) return;
-    var rosterPlayers = camp.users.filter(function(au){
-      return au && au.role !== 'gm' && (au.name || '').trim();
-    });
-    if(!rosterPlayers.length) return; // no roster → in-campaign management stays authoritative
+    var rosterNamed = camp.users.filter(function(au){ return au && (au.name || '').trim(); });
+    var rosterPlayers = rosterNamed.filter(function(au){ return au.role !== 'gm'; });
+    // Extra GM rows beyond the first are co-DMs — they join with full GM powers.
+    var rosterCoDms = rosterNamed.filter(function(au){ return au.role === 'gm'; }).slice(1);
+    if(!rosterPlayers.length && !rosterCoDms.length) return; // no roster → in-campaign management stays authoritative
     state.users = state.users || [];
     var changed = false;
     var byName = {};
     state.users.forEach(function(u){ byName[(u.name||'').trim().toLowerCase()] = u; });
     var keep = {};
+    rosterCoDms.forEach(function(au){
+      var name = au.name.trim(), key = name.toLowerCase();
+      keep[key] = true;
+      var u = byName[key];
+      if(!u){
+        u = { id: 'u_' + Date.now() + '_' + Math.random().toString(36).slice(2,6), name: name, email: '', role: 'dm', color: USER_COLORS[state.users.length % USER_COLORS.length], playerIdx: null };
+        state.users.push(u);
+        byName[key] = u;
+        changed = true;
+      } else if(u.role !== 'dm'){ u.role = 'dm'; changed = true; }
+    });
     rosterPlayers.forEach(function(au){
       var name = au.name.trim(), key = name.toLowerCase();
       keep[key] = true;
@@ -1918,10 +1930,12 @@ function _atlasPullUsers(){
         if(match && match.userId !== u.id){ match.userId = u.id; changed = true; }
       }
     });
-    // Mirror removals: players no longer on the roster leave the table.
+    // Mirror removals: players (and co-DMs) no longer on the roster leave the
+    // table. The primary Keeper is never removed.
+    var primaryDm = state.users.find(function(u){ return u.role === 'dm'; });
     var before = state.users.length;
     state.users = state.users.filter(function(u){
-      if(u.role === 'dm') return true;
+      if(u === primaryDm) return true;
       if(keep[(u.name||'').trim().toLowerCase()]) return true;
       (state.party||[]).forEach(function(p){ if(p.userId === u.id) p.userId = null; });
       if(state.currentUserId === u.id) state.currentUserId = null;
@@ -2707,7 +2721,10 @@ function showJoinScreen() {
   }
   overlay.style.display = 'flex';
   _joinPickId = null;
-  const players = (state.users || []).filter(u => u.role !== 'dm');
+  // Everyone except the table's primary Keeper is pickable — players AND
+  // co-DMs (extra GM seats join here too, with full GM powers).
+  const _firstDm = (state.users || []).find(u => u.role === 'dm');
+  const players = (state.users || []).filter(u => u !== _firstDm);
   // Characters no one has claimed yet — a joiner can pick "who they're
   // supposed to be" even when the GM never added people to the roster.
   const unclaimed = (state.party || [])
@@ -2729,7 +2746,7 @@ function showJoinScreen() {
               ${u.pass ? '<div style="position:absolute;top:.4rem;right:.5rem;font-size:.72rem;opacity:.75" title="Password protected">🔒</div>' : ''}
               <div style="width:44px;height:44px;border-radius:50%;background:${u.color||'#555'};margin:0 auto .45rem;display:flex;align-items:center;justify-content:center;font-size:1.2rem;font-weight:700;color:#fff">${(u.name||'?')[0].toUpperCase()}</div>
               <div style="font-weight:600;color:#e0d6ff;font-size:.9rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${u.name}</div>
-              <div style="font-size:.7rem;opacity:.45;margin-top:.1rem">🎭 Player</div>
+              <div style="font-size:.7rem;opacity:.45;margin-top:.1rem">${u.role === 'dm' ? '🎲 DM' : '🎭 Player'}</div>
             </div>
           `).join('')}
         </div>
