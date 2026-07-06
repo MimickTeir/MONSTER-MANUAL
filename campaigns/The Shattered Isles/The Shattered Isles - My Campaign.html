@@ -1878,38 +1878,57 @@ function _atlasPushBestiary(){
 }
 var ATLAS_LAUNCHER_KEY = 'atlas-mock-v3';
 function _atlasReadLauncher(){ try{ return JSON.parse(_atlasLS().getItem(ATLAS_LAUNCHER_KEY)||'null'); }catch(e){ return null; } }
-// The Atlas launcher's roster (added/edited from its "Edit campaign" modal) and this
-// engine's own state.users are two separate lists with no live channel between pages
-// — Atlas hands off identity once, via the ?as= URL param, at launch time. Pull in
-// anyone added in Atlas that this campaign doesn't know about yet (matched by name,
-// so existing in-campaign users — and any edits already made to them — are untouched).
+// The Atlas launcher's roster ("Edit campaign") is the single source of truth
+// for who sits at the table — like Foundry's user list. On every load of the
+// DM's app we MIRROR it into this campaign's shared state: roster players are
+// added (and tied to the character they're assigned to play), and players who
+// were removed from the roster leave the table (their characters become
+// claimable again). The Keeper is never touched, and a campaign whose roster
+// is empty keeps managing its users in-campaign as before.
 function _atlasPullUsers(){
   try{
     var launcher = _atlasReadLauncher();
     if(!launcher || !Array.isArray(launcher.campaigns)) return;
     var camp = launcher.campaigns.find(function(c){ return c.ns === window.__ATLAS_NS; });
     if(!camp || !Array.isArray(camp.users)) return;
+    var rosterPlayers = camp.users.filter(function(au){
+      return au && au.role !== 'gm' && (au.name || '').trim();
+    });
+    if(!rosterPlayers.length) return; // no roster → in-campaign management stays authoritative
     state.users = state.users || [];
-    var known = {};
-    state.users.forEach(function(u){ known[(u.name||'').trim().toLowerCase()] = true; });
-    var added = false;
-    camp.users.forEach(function(au){
-      var name = (au.name||'').trim();
-      if(!name || known[name.toLowerCase()]) return;
-      var role = au.role === 'gm' ? 'dm' : 'player';
-      // Never add a second DM — this campaign's existing Keeper stays authoritative.
-      if(role === 'dm' && state.users.some(function(u){ return u.role === 'dm'; })) return;
-      var u = { id: 'u_' + Date.now() + '_' + Math.random().toString(36).slice(2,6), name: name, email: '', role: role, color: USER_COLORS[state.users.length % USER_COLORS.length], playerIdx: null };
-      state.users.push(u);
-      known[name.toLowerCase()] = true;
-      added = true;
+    var changed = false;
+    var byName = {};
+    state.users.forEach(function(u){ byName[(u.name||'').trim().toLowerCase()] = u; });
+    var keep = {};
+    rosterPlayers.forEach(function(au){
+      var name = au.name.trim(), key = name.toLowerCase();
+      keep[key] = true;
+      var u = byName[key];
+      if(u && u.role === 'dm') return; // never repurpose the Keeper
+      if(!u){
+        u = { id: 'u_' + Date.now() + '_' + Math.random().toString(36).slice(2,6), name: name, email: '', role: 'player', color: USER_COLORS[state.users.length % USER_COLORS.length], playerIdx: null };
+        state.users.push(u);
+        byName[key] = u;
+        changed = true;
+      }
+      // Tie them to the character the roster says they play (roster wins).
       var plays = (au.plays || '').trim().toLowerCase();
       if(plays){
-        var match = (state.party||[]).find(function(p){ return !p.userId && (p.name||'').trim().toLowerCase() === plays; });
-        if(match) match.userId = u.id;
+        var match = (state.party||[]).find(function(p){ return (p.name||'').trim().toLowerCase() === plays; });
+        if(match && match.userId !== u.id){ match.userId = u.id; changed = true; }
       }
     });
-    if(added) saveState();
+    // Mirror removals: players no longer on the roster leave the table.
+    var before = state.users.length;
+    state.users = state.users.filter(function(u){
+      if(u.role === 'dm') return true;
+      if(keep[(u.name||'').trim().toLowerCase()]) return true;
+      (state.party||[]).forEach(function(p){ if(p.userId === u.id) p.userId = null; });
+      if(state.currentUserId === u.id) state.currentUserId = null;
+      return false;
+    });
+    if(state.users.length !== before) changed = true;
+    if(changed) saveState();
   }catch(e){}
 }
 function _atlasSyncOnLoad(){ try{ _atlasMigrateBestiary(); _atlasPullBestiary(); _atlasPullUsers(); }catch(e){} }
@@ -2643,10 +2662,14 @@ function copyInviteLink(userId) {
 }
 
 function handleInviteLink(data) {
-  // Ensure user exists in local state
   state.users = state.users || [];
   let user = state.users.find(u => u.id === data.userId);
   if (!user) {
+    // The table's user list is authoritative (Foundry-style): a personal
+    // invite for someone who's since been removed doesn't re-mint them —
+    // it falls back to the shared join screen.
+    const hasPlayers = state.users.some(u => u.role !== 'dm');
+    if (hasPlayers) { showJoinScreen(); return; }
     user = {
       id: data.userId,
       name: data.name,
@@ -2711,8 +2734,8 @@ function showJoinScreen() {
           `).join('')}
         </div>
       ` : (unclaimed.length ? '' : `<p style="color:#aaa;margin-bottom:1.4rem;font-size:.9rem">No players yet — be the first to join.</p>`)}
-      ${unclaimed.length ? `
-        <p style="color:#7e745f;margin:0 0 .7rem;font-size:.78rem;text-transform:uppercase;letter-spacing:.16em">${players.length ? 'Or claim your character' : 'Claim your character'}</p>
+      ${(!players.length && unclaimed.length) ? `
+        <p style="color:#7e745f;margin:0 0 .7rem;font-size:.78rem;text-transform:uppercase;letter-spacing:.16em">Claim your character</p>
         <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:.65rem;margin-bottom:1.4rem">
           ${unclaimed.map(x => `
             <div onclick="joinAsCharacter(${x.i})"
@@ -2734,9 +2757,9 @@ function showJoinScreen() {
         </div>
         <div id="join-pass-err" style="color:#e0768a;font-size:.75rem;margin-top:.4rem;display:none">Incorrect password.</div>
       </div>
-      <div style="display:flex;gap:.5rem;justify-content:center;flex-wrap:wrap">
+      ${players.length ? '' : `<div style="display:flex;gap:.5rem;justify-content:center;flex-wrap:wrap">
         <button class="btn" onclick="joinAsNewPlayer()" style="font-size:.82rem">＋ I'm new — add me</button>
-      </div>
+      </div>`}
       <div style="margin-top:1.5rem">
         <a onclick="attemptGmEntry()" style="cursor:pointer;color:#7e745f;font-size:.78rem;text-decoration:underline;text-underline-offset:3px">I'm the Game Master →</a>
       </div>
