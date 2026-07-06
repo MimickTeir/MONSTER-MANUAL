@@ -57,11 +57,32 @@ function resolveSafe(urlPath) {
 // One JSON file per campaign namespace, so multiple campaigns don't collide.
 const STATE_DIR = path.join(app.getPath('userData'), 'atlas-states');
 function _stateFile(ns) {
+  // NOTE: ':' must NOT survive into the filename — every namespace ends in
+  // '::', and a colon in a Windows filename makes the write fail silently
+  // (NTFS treats it as an alternate-data-stream separator). That one
+  // character meant NO campaign state ever persisted on Windows hosts.
+  const safe = String(ns || 'default').replace(/[^a-zA-Z0-9_.-]/g, '_') || 'default';
+  return path.join(STATE_DIR, safe + '.json');
+}
+// Pre-fix hosts (macOS/Linux) may hold state under the old colon-bearing name.
+function _legacyStateFile(ns) {
   const safe = String(ns || 'default').replace(/[^a-zA-Z0-9_.:-]/g, '_') || 'default';
   return path.join(STATE_DIR, safe + '.json');
 }
-function getState(ns) { try { return fs.readFileSync(_stateFile(ns), 'utf8'); } catch (e) { return '{}'; } }
-function setState(ns, body) { try { fs.mkdirSync(STATE_DIR, { recursive: true }); fs.writeFileSync(_stateFile(ns), body); return true; } catch (e) { return false; } }
+function getState(ns) {
+  try { return fs.readFileSync(_stateFile(ns), 'utf8'); }
+  catch (e) {
+    try {
+      const legacy = fs.readFileSync(_legacyStateFile(ns), 'utf8');
+      setState(ns, legacy); // migrate forward
+      return legacy;
+    } catch (e2) { return '{}'; }
+  }
+}
+function setState(ns, body) {
+  try { fs.mkdirSync(STATE_DIR, { recursive: true }); fs.writeFileSync(_stateFile(ns), body); return true; }
+  catch (e) { try { console.error('[Atlas] setState failed for ns', ns, e.message); } catch (e2) {} return false; }
+}
 
 // Build the small HTML build-tag + global injected into every served page.
 function buildTag() {
@@ -80,8 +101,10 @@ function registerProtocol() {
         const ns = u.searchParams.get('ns') || 'default';
         if (request.method === 'POST') {
           const body = await request.text();
-          setState(ns, body);
-          return new Response('{"ok":true}', { status: 200, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
+          const ok = setState(ns, body);
+          // An honest failure beats a silent one — the Host panel verifies this.
+          return new Response(ok ? '{"ok":true}' : '{"ok":false,"error":"state write failed"}',
+            { status: ok ? 200 : 500, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
         }
         return new Response(getState(ns), { status: 200, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
       }
@@ -124,7 +147,11 @@ function startHttpServer() {
           if (req.method === 'POST') {
             let body = '';
             req.on('data', c => { body += c; if (body.length > 60 * 1024 * 1024) req.destroy(); });
-            req.on('end', () => { setState(ns, body); res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); res.end('{"ok":true}'); });
+            req.on('end', () => {
+              const ok = setState(ns, body);
+              res.writeHead(ok ? 200 : 500, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+              res.end(ok ? '{"ok":true}' : '{"ok":false,"error":"state write failed"}');
+            });
             return;
           }
           res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
