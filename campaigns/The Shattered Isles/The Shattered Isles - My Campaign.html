@@ -10592,6 +10592,9 @@ function _codexLibraryHtml() {
         bannerExtra = `<button onclick="_codexOpenEntry('${bkHub.id}')" style="background:linear-gradient(180deg,var(--brass-glow),var(--brass-deep));
               color:var(--ink-abyss);border:0;padding:6px 12px;border-radius:3px;font-family:var(--serif-sc);text-transform:uppercase;
               letter-spacing:.16em;font-size:.6rem;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:5px">Read the cover folio</button>`;
+        if (gmMode) bannerExtra += `<button onclick="_codexOpenComposer({bookId:'${bkHub.id}'})" style="background:transparent;border:1px solid var(--brass-deep);color:var(--brass-glow);
+              padding:6px 12px;border-radius:3px;font-family:var(--serif-sc);text-transform:uppercase;letter-spacing:.16em;
+              font-size:.6rem;cursor:pointer;display:flex;align-items:center;gap:5px">＋ Add a folio</button>`;
         bannerExtra += `<button onclick="_codexSetFilter({kind:'books'})" style="background:transparent;border:1px solid var(--ink-edge);color:var(--bone-mid);
               padding:6px 12px;border-radius:3px;font-family:var(--serif-sc);text-transform:uppercase;letter-spacing:.16em;
               font-size:.6rem;cursor:pointer;display:flex;align-items:center;gap:5px">← Books</button>`;
@@ -11174,7 +11177,46 @@ function _codexReaderHtml(e) {
         onmouseover="this.style.background='rgba(95,71,32,.1)'" onmouseout="this.style.background='rgba(95,71,32,.05)'">🖼 Add a picture to this folio</button>` : '')}
 
       <div style="display:flex;flex-wrap:wrap;gap:18px;padding-bottom:18px;border-bottom:1px solid rgba(95,71,32,.2);margin-bottom:24px">
-        ${_codexMetaItem('Type',   e.typeLabel || t.label)}
+        ${_codexEditMode ? `
+        <div style="display:flex;flex-direction:column;gap:1px;min-width:70px">
+          <span style="font-family:var(--serif-sc);text-transform:uppercase;letter-spacing:.18em;font-size:.58rem;color:var(--ink-margin)">Archive</span>
+          <select id="codex-type-select"
+            style="font-family:var(--serif-body);font-size:.82rem;color:var(--ink-script);background:rgba(95,71,32,.08);
+                   border:1px solid rgba(95,71,32,.3);border-radius:3px;padding:2px 5px;outline:none;cursor:pointer">
+            ${CODEX_DOC_TYPES.filter(function(x) { return x.id !== 'all'; }).map(function(x) {
+              return `<option value="${x.id}" ${x.id === e.type ? 'selected' : ''}>${x.icon} ${_escHtml(x.label)}</option>`;
+            }).join('')}
+          </select>
+        </div>` : _codexMetaItem('Type', e.typeLabel || t.label)}
+        ${(function() {
+          if (_cxIsBookHub(e)) {
+            return `<div style="display:flex;flex-direction:column;gap:1px;min-width:70px">
+              <span style="font-family:var(--serif-sc);text-transform:uppercase;letter-spacing:.18em;font-size:.58rem;color:var(--ink-margin)">Book</span>
+              <span style="font-family:var(--serif-body);font-size:.82rem;color:var(--ink-faded)">📖 This folio is a book's cover</span>
+            </div>`;
+          }
+          if (_codexEditMode) {
+            var hubs = _cxEntries().filter(_cxIsBookHub);
+            if (!hubs.length) return '';
+            return `<div style="display:flex;flex-direction:column;gap:1px;min-width:70px">
+              <span style="font-family:var(--serif-sc);text-transform:uppercase;letter-spacing:.18em;font-size:.58rem;color:var(--ink-margin)">Book</span>
+              <select id="codex-book-select"
+                style="font-family:var(--serif-body);font-size:.82rem;color:var(--ink-script);background:rgba(95,71,32,.08);
+                       border:1px solid rgba(95,71,32,.3);border-radius:3px;padding:2px 5px;outline:none;cursor:pointer;max-width:220px">
+                <option value="">— loose on the shelf —</option>
+                ${hubs.map(function(h) { return `<option value="${h.id}" ${h.id === e.bookId ? 'selected' : ''}>📖 ${_escHtml(h.title)}</option>`; }).join('')}
+              </select>
+            </div>`;
+          }
+          var hb = _cxIsBookMember(e) ? _cxEntry(e.bookId) : null;
+          if (!hb) return '';
+          return `<div style="display:flex;flex-direction:column;gap:1px;min-width:70px">
+            <span style="font-family:var(--serif-sc);text-transform:uppercase;letter-spacing:.18em;font-size:.58rem;color:var(--ink-margin)">Book</span>
+            <button onclick="_codexSetFilter({kind:'book',id:'${hb.id}'})" title="Open this book"
+              style="font-family:var(--serif-body);font-size:.82rem;color:var(--ink-script);background:rgba(95,71,32,.08);
+                     border:1px solid rgba(95,71,32,.3);border-radius:3px;padding:1px 7px;cursor:pointer;text-align:left">📖 ${_escHtml(hb.title)}</button>
+          </div>`;
+        })()}
         ${(e.type === 'timeline' && (_codexEditMode || (e.day != null && e.day !== ''))) ? _codexMetaItem('Day', (e.day != null && e.day !== '') ? String(e.day) : '') : ''}
         ${(e.type === 'char') ? _codexMetaItem('Relationship', e.npcRel || 'unknown') : ''}
         ${(e.type === 'char' && (e.npcRace || _codexEditMode)) ? _codexMetaItem('Race', e.npcRace||'') : ''}
@@ -11523,6 +11565,20 @@ function _codexOpenComposer(opts) {
         <label style="font-family:var(--serif-sc);text-transform:uppercase;letter-spacing:.2em;font-size:.6rem;color:var(--ash);display:block;margin-bottom:6px">Kind of entry</label>
         <div id="codex-c-types" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(100px,1fr));gap:5px">${typeButtons}</div>
       </div>
+      ${(function() {
+        var hubs = _cxEntries().filter(_cxIsBookHub);
+        if (!hubs.length) return '';
+        var pre = opts.bookId || '';
+        return `<div>
+          <label style="font-family:var(--serif-sc);text-transform:uppercase;letter-spacing:.2em;font-size:.6rem;color:var(--ash);display:block;margin-bottom:5px">Bind into a book (optional)</label>
+          <select id="codex-c-book"
+            style="width:100%;box-sizing:border-box;background:var(--ink-lift);border:1px solid var(--ink-edge);
+                   color:var(--bone);padding:9px 11px;border-radius:4px;font-family:var(--serif-body);font-size:.88rem;outline:none;cursor:pointer">
+            <option value="">— loose on the shelf —</option>
+            ${hubs.map(function(h) { return `<option value="${h.id}" ${h.id === pre ? 'selected' : ''}>📖 ${_escHtml(h.title)}</option>`; }).join('')}
+          </select>
+        </div>`;
+      })()}
       <div>
         <label style="font-family:var(--serif-sc);text-transform:uppercase;letter-spacing:.2em;font-size:.6rem;color:var(--ash);display:block;margin-bottom:5px">Begin the body (optional)</label>
         <textarea id="codex-c-body" rows="4" placeholder="Or leave blank — you can write directly on the page."
@@ -11720,6 +11776,17 @@ function _codexComposerSubmit() {
     var parType  = par ? (par.type || '') : '';
     entry.related.push({ id: parentId, title: parTitle, type: parType });
   }
+  // Bind into a book, if one was chosen — cross-link both ways like an import.
+  var bookSel = document.getElementById('codex-c-book');
+  if (bookSel && bookSel.value) {
+    var bkHub = _cxEntry(bookSel.value);
+    if (bkHub && _cxIsBookHub(bkHub)) {
+      entry.bookId = bkHub.id;
+      if (!Array.isArray(bkHub.related)) bkHub.related = [];
+      if (!bkHub.related.some(function(r) { return r.id === entry.id; })) bkHub.related.push({ id: entry.id, title: entry.title, type: entry.type });
+      if (!entry.related.some(function(r) { return r.id === bkHub.id; })) entry.related.push({ id: bkHub.id, title: bkHub.title, type: bkHub.type });
+    }
+  }
   _cxTrackRecent(entry.id, 'Drafted');
   _cxRecount();
   _cxSave();
@@ -11877,6 +11944,31 @@ function _codexSaveEdits() {
   var subtitleEl = document.getElementById('codex-subtitle-el');
   if (titleEl)    e.title    = titleEl.textContent.trim() || e.title;
   if (subtitleEl) e.subtitle = subtitleEl.textContent.trim();
+
+  // Archive (type) — re-shelves the folio into whichever archive was picked.
+  var typeSel = document.getElementById('codex-type-select');
+  if (typeSel && typeSel.value && CODEX_TYPE_MAP[typeSel.value] && typeSel.value !== e.type) {
+    e.type = typeSel.value;
+    delete e.typeLabel; // stale label would mask the new archive's name
+    if (e.type === 'char' && !e.npcRel) e.npcRel = 'unknown';
+  }
+
+  // Book binding — bind into (or release from) a book; binding cross-links both ways.
+  var bookSel = document.getElementById('codex-book-select');
+  if (bookSel && !_cxIsBookHub(e) && (e.bookId || '') !== bookSel.value) {
+    if (bookSel.value) {
+      var bHub = _cxEntry(bookSel.value);
+      if (bHub && _cxIsBookHub(bHub)) {
+        e.bookId = bHub.id;
+        if (!Array.isArray(bHub.related)) bHub.related = [];
+        if (!Array.isArray(e.related)) e.related = [];
+        if (!bHub.related.some(function(r) { return r.id === e.id; })) bHub.related.push({ id: e.id, title: e.title, type: e.type });
+        if (!e.related.some(function(r) { return r.id === bHub.id; })) e.related.push({ id: bHub.id, title: bHub.title, type: bHub.type });
+      }
+    } else {
+      delete e.bookId; // back onto the open shelves
+    }
+  }
 
   // Meta
   var eraEl    = document.getElementById('codex-meta-era');
