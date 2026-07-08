@@ -2195,6 +2195,30 @@ function getNextXP(xp) {
   return next ? next.xp : null;
 }
 
+// ── Per-character XP ──────────────────────────
+// Sheets created before per-character XP have no p.xp — they fall back to the
+// old shared pool (state.partyXP) until XP is first awarded or set for them.
+function charXP(p) {
+  if (!p) return 0;
+  return p.xp != null ? (parseInt(p.xp) || 0) : (parseInt(state.partyXP) || 0);
+}
+function setCharXP(p, xp) {
+  if (!p) return;
+  p.xp = Math.max(0, parseInt(xp) || 0);
+}
+// XP needed to reach the level after `level` (null at max level)
+function nextXPForLevel(level) {
+  const next = XP_MILESTONES.find(m => m.level === (parseInt(level) || 1) + 1);
+  return next ? next.xp : null;
+}
+// Crew sidekicks, the Bastion, and a few other systems still read a single
+// party level — keep it pinned to the highest character (or bastion) level.
+function _syncPartyLevel() {
+  const levels = (state.party || []).map(p => parseInt(p.level) || 1);
+  const bastionLv = (state.bastion && parseInt(state.bastion.level)) || 1;
+  state.partyLevel = Math.max(1, bastionLv, ...levels);
+}
+
 // ══════════════════════════════════════════════
 //  BOOT
 // ══════════════════════════════════════════════
@@ -3588,11 +3612,17 @@ function openPersonalCurrencyEdit(charIdx) {
 function renderXPDisplay() {
   const el = document.getElementById('pd-xp-display');
   if (!el) return;
-  const xp = state.partyXP || 0;
-  const level = state.partyLevel || 1;
-  const nextXP = getNextXP(xp);
+  // XP is per-character now — show the logged-in user's character if bound,
+  // otherwise fall back to the highest-level character.
+  const party = state.party || [];
+  const own = party.find(p => p.userId && p.userId === state.currentUserId);
+  const p = own || party.reduce((a, b) => (!a || (parseInt(b.level)||1) > (parseInt(a.level)||1)) ? b : a, null);
+  if (!p) { el.innerHTML = '<span style="opacity:.4">No characters yet</span>'; return; }
+  const xp = charXP(p);
+  const level = parseInt(p.level) || 1;
+  const nextXP = nextXPForLevel(level);
   el.innerHTML = `
-    <span style="color:#c9a84c;font-weight:700">Level ${level}</span>
+    <span style="color:#c9a84c;font-weight:700">${p.name ? p.name + ' · ' : ''}Level ${level}</span>
     <span style="opacity:.4;margin:0 .4rem">·</span>
     <span>${xp.toLocaleString()} XP</span>
     ${nextXP ? `<div style="font-size:.75rem;opacity:.4;margin-top:.1rem">Next: ${nextXP.toLocaleString()} XP</div>` : '<div style="font-size:.75rem;opacity:.4;margin-top:.1rem">Max level</div>'}
@@ -4218,7 +4248,7 @@ function renderPlayerSubNav() {
   const party = state.party || [];
   if (party.length === 0) {
     nav.innerHTML = '';
-    area.innerHTML = `<div class="card" style="color:#666;font-style:italic;text-align:center;padding:30px">${gmMode ? 'Click ➕ Add Player to create character sheets.' : 'No party members yet.'}</div>`;
+    area.innerHTML = `<div class="card" style="color:#666;font-style:italic;text-align:center;padding:30px">${gmMode ? 'Click ➕ New Character to create character sheets.' : 'No party members yet.'}</div>`;
     return;
   }
   // Auto-select this player's assigned character if not already set
@@ -4245,7 +4275,7 @@ function renderPlayers() {
   canvas.style.minHeight = '0';
   // Build the unified toolbar + sheet host once; everything (character widgets AND the
   // party/shared widgets) now lives on a single canvas built by showPlayerSheet().
-  // The toolbar's "➕ Add Player" button is gm-gated, so force a full rebuild whenever
+  // The toolbar's "➕ New Character" button is gm-gated, so force a full rebuild whenever
   // gmMode has changed since the canvas was last built (e.g. after the DM logs in) —
   // otherwise the else-branch refresh leaves the stale (player) toolbar in place.
   if (!document.getElementById('player-sheet-area') || canvas.dataset.gm !== String(gmMode)) {
@@ -4254,7 +4284,7 @@ function renderPlayers() {
       <div id="player-tab-toolbar" style="display:flex;gap:.45rem;align-items:center;flex-wrap:wrap;margin-bottom:.55rem">
         <div style="font-size:.62rem;font-family:'Cinzel',serif;opacity:.4;text-transform:uppercase;letter-spacing:.1em;margin-right:.1rem">🧙 Characters</div>
         <div id="player-sub-nav" style="display:flex;gap:4px;flex-wrap:wrap;align-items:center"></div>
-        ${gmMode?`<button class="btn btn-sm" onclick="openImportCharacterModal()" style="font-size:.66rem;padding:.1rem .4rem">➕ Add Player</button>`:''}
+        ${gmMode?`<button class="btn btn-sm" onclick="openImportCharacterModal()" style="font-size:.66rem;padding:.1rem .4rem">➕ New Character</button>`:''}
       </div>
       <div id="player-sheet-area"></div>`;
     renderPlayerSubNav();   // fills sub-nav + showPlayerSheet(active) → builds unified canvas + party widgets
@@ -4484,18 +4514,18 @@ function showPlayerSheet(idx) {
       </div>`:''}
     </div>`;
 
-  // XP bar
-  const xp = state.partyXP||0, level = state.partyLevel||1, nextXP = getNextXP(xp);
+  // XP bar — per-character experience
+  const xp = charXP(p), level = parseInt(p.level)||1, nextXP = nextXPForLevel(level);
   const xpPct = nextXP ? Math.min(100, Math.round(xp/nextXP*100)) : 100;
   const xpLevelUp = gmMode && nextXP && xp >= nextXP; // milestone crossed
   const xpBlock = `
     <div style="margin-bottom:.75rem;padding:.45rem .65rem;background:rgba(201,168,76,0.07);border-radius:8px;border:1px solid ${xpLevelUp?'rgba(144,208,144,.4)':'rgba(201,168,76,.15)'}">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.28rem">
-        <span style="font-size:.72rem;opacity:.45;text-transform:uppercase;letter-spacing:.04em">⭐ Party XP</span>
+        <span style="font-size:.72rem;opacity:.45;text-transform:uppercase;letter-spacing:.04em">⭐ Experience</span>
         ${gmMode?`<div style="display:flex;gap:.3rem;align-items:center">
           ${xpLevelUp?`<span style="font-size:.65rem;color:#90d090;font-weight:600">✨ Ready!</span>`:''}
-          <button class="btn btn-sm" onclick="openXPEdit()" style="font-size:.65rem;padding:.07rem .28rem">✏️</button>
-          ${level<20?`<button class="btn btn-sm" onclick="openLevelUpModal()" style="font-size:.65rem;padding:.07rem .35rem;${xpLevelUp?'border-color:rgba(144,208,144,.5);color:#90d090;background:rgba(144,208,144,.12)':''}">⬆ Level Up</button>`:''}
+          <button class="btn btn-sm" onclick="openXPEdit(${idx})" style="font-size:.65rem;padding:.07rem .28rem">✏️</button>
+          ${level<20?`<button class="btn btn-sm" onclick="openLevelUpModal(${idx})" style="font-size:.65rem;padding:.07rem .35rem;${xpLevelUp?'border-color:rgba(144,208,144,.5);color:#90d090;background:rgba(144,208,144,.12)':''}">⬆ Level Up</button>`:''}
         </div>`:''}
       </div>
       <div style="display:flex;align-items:baseline;gap:.5rem;margin-bottom:.25rem">
@@ -4622,8 +4652,9 @@ function showPlayerSheet(idx) {
         ].filter(Boolean);
         return rows.length ? `<div style="font-size:.78rem;display:flex;gap:.6rem 1rem;flex-wrap:wrap">${rows.join('')}</div>` : `<div style="font-size:.72rem;color:#444;font-style:italic;text-align:center;padding:.4rem 0">No proficiencies set — use ✏️ Edit</div>`;
   })();
-  const _cwBodies = { xp:xpBlock, hp:hpBlock, status:statusBlock, combat:combatBlock, abilities:abilitiesBlock, skills:skillsBlock, hitdice:hitDieBlock, currency:currencyBlock, profs:profsBlock, attunement:(attunementBlock||`<div style="font-size:.72rem;color:#444;font-style:italic;text-align:center;padding:.4rem 0">No attunable items</div>`) };
-  if (!p._sheetV3) { p.sectionLayout = _fullDefaultLayout(p); p._sheetV3 = true; saveState(); }
+  // hp widget = hit points + the hit die tracker (merged into one card)
+  const _cwBodies = { xp:xpBlock, hp:hpBlock+hitDieBlock, status:statusBlock, combat:combatBlock, abilities:abilitiesBlock, skills:skillsBlock, currency:currencyBlock, profs:profsBlock, attunement:(attunementBlock||`<div style="font-size:.72rem;color:#444;font-style:italic;text-align:center;padding:.4rem 0">No attunable items</div>`) };
+  if (!p._sheetV4) { p.sectionLayout = _fullDefaultLayout(p); p._sheetV4 = true; saveState(); }
   const _wLayout = _getLayout(idx);
   const _wAll = _charWidgetKeys(p);
   const _wKeys = Object.keys(_wLayout);
@@ -4671,12 +4702,17 @@ function showPlayerSheet(idx) {
           <span style="font-size:.6rem;opacity:.4">drag header to move · edges to resize · × to remove</span>
           <div style="margin-left:auto;display:flex;gap:.3rem;align-items:center;flex-wrap:wrap">
             <button class="btn btn-sm" onclick="openCharacterEditor(${idx})" style="font-size:.64rem;padding:.12rem .4rem;background:rgba(201,168,76,.16);border-color:rgba(201,168,76,.45);color:#e0c878">✏️ Edit character &amp; paste</button>
-            <select onchange="if(this.value){applyLayoutPreset(${idx},this.value);this.value='';}" title="Rearrange every widget with a preset" style="font-size:.64rem;padding:.12rem .3rem;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);color:#aaa;border-radius:5px;cursor:pointer">
+            <select onchange="if(this.value==='__save__'){saveLayoutPresetPrompt(${idx});this.value='';}else if(this.value==='__del__'){deleteLayoutPresetPrompt(${idx});this.value='';}else if(this.value){applyLayoutPreset(${idx},this.value);this.value='';}" title="Rearrange every widget with a preset, or save your own" style="font-size:.64rem;padding:.12rem .3rem;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);color:#aaa;border-radius:5px;cursor:pointer">
               <option value="">▦ Layout preset…</option>
-              <option value="stack">Single column</option>
-              <option value="twoCol">Two columns</option>
-              <option value="martial">Martial</option>
-              <option value="caster">Caster</option>
+              <option value="__save__">💾 Save current as preset…</option>
+              ${_savedPresetOptions()}
+              <optgroup label="Built-in">
+                <option value="stack">Single column</option>
+                <option value="twoCol">Two columns</option>
+                <option value="martial">Martial</option>
+                <option value="caster">Caster</option>
+              </optgroup>
+              ${Object.keys(state.layoutPresets||{}).length?'<option value="__del__">🗑 Delete a saved preset…</option>':''}
             </select>
             <button onclick="resetLayout(${idx})" style="font-size:.64rem;padding:.12rem .35rem;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);color:#888;border-radius:5px;cursor:pointer">↺ Reset</button>
           </div>
@@ -5021,8 +5057,8 @@ const _PANEL_DEF = {
   spells:{w:344,h:270}, feats:{w:344,h:190}, inventory:{w:344,h:210},
   tempBuffs:{w:344,h:145}, _conditions:{w:344,h:140},
   // Stat widgets
-  xp:{w:344,h:104}, hp:{w:344,h:150}, status:{w:344,h:150}, combat:{w:344,h:118},
-  abilities:{w:344,h:118}, skills:{w:344,h:280}, hitdice:{w:344,h:120},
+  xp:{w:344,h:104}, hp:{w:344,h:252}, status:{w:344,h:150}, combat:{w:344,h:118},
+  abilities:{w:344,h:118}, skills:{w:344,h:280},
   currency:{w:344,h:130}, profs:{w:344,h:140}, attunement:{w:344,h:150},
   // Party / shared widgets (unified onto the same canvas)
   hpBars:{w:344,h:210}, treasury:{w:344,h:360}, partyNotes:{w:344,h:200},
@@ -5032,18 +5068,17 @@ const _PANEL_DEF = {
 // Stat-widget metadata (the always-available, non-section widgets)
 const STAT_WIDGET_META = {
   xp:        {icon:'✦',  label:'Experience'},
-  hp:        {icon:'❤️',  label:'Hit Points'},
+  hp:        {icon:'❤️',  label:'Hit Points & Hit Dice'},
   status:    {icon:'💀',  label:'Status & Death Saves'},
   combat:    {icon:'🛡',  label:'Combat Stats'},
   abilities: {icon:'🎲',  label:'Ability Scores'},
   skills:    {icon:'📜',  label:'Skills & Saves'},
-  hitdice:   {icon:'🩸',  label:'Hit Dice'},
   currency:  {icon:'💰',  label:'Currency'},
   profs:     {icon:'🎓',  label:'Proficiencies'},
   attunement:{icon:'🔮',  label:'Attunement'}
 };
 // Stat widgets shown on a fresh sheet, in order
-const STAT_WIDGET_ORDER = ['xp','hp','status','combat','abilities','skills','hitdice','currency','profs','attunement'];
+const STAT_WIDGET_ORDER = ['xp','hp','status','combat','abilities','skills','currency','profs','attunement'];
 
 // Party / shared widgets — the same panels that used to live on a separate tab canvas,
 // now unified onto the character canvas so everything is one addable/removable widget set.
@@ -5061,22 +5096,50 @@ function _charWidgetKeys(p) {
   return [...STAT_WIDGET_ORDER, ...order, '_conditions', ...PARTY_WIDGET_ORDER];
 }
 
-// Default unified layout: stat widgets in the left column; sections, conditions and party
-// widgets flow through two columns to the right.
+// Default unified layout, modeled on the Garrick reference sheet:
+// XP / ability scores / skills down the left, the merged HP + Hit Dice card and
+// combat stats beside them, status & currency in the third column, and a wide
+// right column for features, actions and spells. Party widgets fill the bottom.
 function _fullDefaultLayout(p) {
-  const GAP = 12, LW = 344, RX = LW + GAP;
-  const layout = {};
-  let ly = 0;
-  STAT_WIDGET_ORDER.forEach(k => { const d=_PANEL_DEF[k]; layout[k]={x:0,y:ly,w:d.w,h:d.h}; ly+=d.h+GAP; });
-  const secs = [...(p.sectionOrder || ['actions','bonusActions','reactions','spells','feats','inventory'])];
-  if (!secs.includes('tempBuffs')) secs.push('tempBuffs');
-  const rightKeys = [...secs, '_conditions', ...PARTY_WIDGET_ORDER];
-  const colH = [0, 0];
-  rightKeys.forEach(k => {
-    const d=_PANEL_DEF[k]||{w:344,h:180};
-    const c = colH[0] <= colH[1] ? 0 : 1;
-    layout[k] = { x: RX + c*(d.w+GAP), y: colH[c], w: d.w, h: d.h };
-    colH[c] += d.h + GAP;
+  const GAP = 12;
+  const L1 = 0, L2 = 356, L3 = 712, R = 1024; // column x origins
+  const layout = {
+    // Column 1
+    xp:            {x:L1, y:0,    w:344, h:104},
+    abilities:     {x:L1, y:116,  w:344, h:130},
+    skills:        {x:L1, y:258,  w:344, h:340},
+    profs:         {x:L1, y:610,  w:344, h:140},
+    tempBuffs:     {x:L1, y:762,  w:344, h:145},
+    partyNotes:    {x:L1, y:919,  w:344, h:200},
+    quests:        {x:L1, y:1131, w:344, h:300},
+    // Column 2 — merged Hit Points + Hit Dice card up top
+    hp:            {x:L2, y:0,    w:344, h:252},
+    combat:        {x:L2, y:264,  w:344, h:118},
+    _conditions:   {x:L2, y:394,  w:344, h:300},
+    inventory:     {x:L2, y:706,  w:344, h:210},
+    personalNotes: {x:L2, y:928,  w:344, h:200},
+    // Column 3
+    status:        {x:L3, y:0,    w:344, h:252},
+    currency:      {x:L3, y:264,  w:344, h:130},
+    attunement:    {x:L3, y:406,  w:344, h:150},
+    treasury:      {x:L3, y:568,  w:344, h:380},
+    hpBars:        {x:L3, y:960,  w:344, h:210},
+    // Wide right column
+    feats:         {x:R,  y:0,    w:520, h:380},
+    actions:       {x:R,  y:392,  w:520, h:230},
+    bonusActions:  {x:R,  y:634,  w:520, h:180},
+    reactions:     {x:R,  y:826,  w:520, h:180},
+    spells:        {x:R,  y:1018, w:520, h:270},
+    calendar:      {x:R,  y:1300, w:520, h:340}
+  };
+  // Any widget this character has that the reference layout doesn't place
+  // (custom sections, future widgets) flows below the columns.
+  let overflowY = Math.max(...Object.values(layout).map(b => b.y + b.h)) + GAP;
+  _charWidgetKeys(p).forEach(k => {
+    if (layout[k]) return;
+    const d = _PANEL_DEF[k] || {w:344, h:180};
+    layout[k] = {x: L1, y: overflowY, w: d.w, h: d.h};
+    overflowY += d.h + GAP;
   });
   return layout;
 }
@@ -5233,94 +5296,214 @@ function _renderFreePanel(p, idx, key, canEdit, layout, statBodies, editing) {
 }
 
 // Drag ────────────────────────────────
+// While dragging or resizing: the pointer near the top/bottom edge auto-scrolls
+// the tab, and any panel the active box overlaps is pushed out of the way so
+// panels never end up stacked on top of each other.
+let _pdLast = null, _pdRAF = null;
+const _PUSH_GAP = 12, _SCROLL_EDGE = 70, _SCROLL_MAX = 18;
+
+function _panelScroller(ci) {
+  const _CI = {'__tab__':'players-canvas','__dm__':'dm-canvas','__crew__':'crew-canvas','__quests__':'quests-canvas'};
+  const canvasId = (typeof ci==='string') ? (_CI[ci]||'players-canvas') : `char-canvas-${ci}`;
+  let el = document.getElementById(canvasId);
+  el = el && el.parentElement;
+  while (el && el !== document.body) {
+    const s = getComputedStyle(el);
+    if (/(auto|scroll)/.test(s.overflowY)) return el;
+    el = el.parentElement;
+  }
+  return document.scrollingElement || document.documentElement;
+}
+function _layoutSnapshot(layout) {
+  const snap = {};
+  Object.keys(layout).forEach(k => { snap[k] = { x:layout[k].x, y:layout[k].y, w:layout[k].w, h:layout[k].h }; });
+  return snap;
+}
+function _rectsOverlap(a, b) {
+  return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+}
+// Push panels below whatever they collide with — the active panel keeps its spot.
+// Each frame starts from the pre-drag snapshot, so panels spring back once the
+// active box moves away.
+function _resolveCollisions(layout, activeKey) {
+  if (!layout[activeKey]) return;
+  const others = Object.keys(layout).filter(k => k !== activeKey)
+    .sort((a,b) => layout[a].y - layout[b].y || layout[a].x - layout[b].x);
+  const settled = [activeKey];
+  others.forEach(k => {
+    const box = layout[k];
+    let guard = 0, hit = true;
+    while (hit && guard++ < 60) {
+      hit = false;
+      for (const s of settled) {
+        const sb = layout[s];
+        if (_rectsOverlap(box, sb)) { box.y = sb.y + sb.h + _PUSH_GAP; hit = true; }
+      }
+    }
+    settled.push(k);
+  });
+}
+function _syncPanelPositions(ci, layout, activeKey) {
+  Object.keys(layout).forEach(k => {
+    if (k === activeKey) return;
+    const el = document.getElementById(`panel-${ci}-${k}`);
+    if (!el) return;
+    if (!el.style.transition) el.style.transition = 'left .13s ease, top .13s ease';
+    el.style.left = layout[k].x + 'px';
+    el.style.top  = layout[k].y + 'px';
+  });
+}
+function _clearPanelTransitions(ci) {
+  Object.keys(_getLayout(ci)).forEach(k => {
+    const el = document.getElementById(`panel-${ci}-${k}`);
+    if (el) el.style.transition = '';
+  });
+}
+function _autoScrollTick() {
+  _pdRAF = null;
+  const st = _pd || _pr;
+  if (!st || !_pdLast) return;
+  const sc = st.scroller;
+  if (sc) {
+    const winScroller = sc === document.scrollingElement || sc === document.documentElement;
+    const rect = winScroller ? null : sc.getBoundingClientRect();
+    const top = rect ? rect.top : 0;
+    const bottom = rect ? rect.bottom : window.innerHeight;
+    let v = 0;
+    if (_pdLast.y < top + _SCROLL_EDGE)         v = -Math.ceil((top + _SCROLL_EDGE - _pdLast.y) / _SCROLL_EDGE * _SCROLL_MAX);
+    else if (_pdLast.y > bottom - _SCROLL_EDGE) v =  Math.ceil((_pdLast.y - (bottom - _SCROLL_EDGE)) / _SCROLL_EDGE * _SCROLL_MAX);
+    if (v) {
+      const before = sc.scrollTop;
+      sc.scrollTop = before + v;
+      const moved = sc.scrollTop - before;
+      if (moved) {
+        st.scrollDY = (st.scrollDY || 0) + moved;
+        if (_pd) _applyDragFrame(); else _applyResizeFrame();
+      }
+    }
+  }
+  _pdRAF = requestAnimationFrame(_autoScrollTick);
+}
+function _applyDragFrame() {
+  if (!_pd || !_pdLast) return;
+  const {ci, key, sx, sy, px, py, orig} = _pd;
+  const layout = _getLayout(ci);
+  if (!layout[key]) return;
+  const nx = Math.max(0, px + (_pdLast.x - sx));
+  const ny = Math.max(0, py + (_pdLast.y - sy) + (_pd.scrollDY || 0));
+  // Reset everything else to its pre-drag spot, then push out of the dragged box's way
+  Object.keys(orig).forEach(k => { if (k !== key && layout[k]) { layout[k].x = orig[k].x; layout[k].y = orig[k].y; } });
+  layout[key].x = nx; layout[key].y = ny;
+  _resolveCollisions(layout, key);
+  const el = document.getElementById(`panel-${ci}-${key}`);
+  if (el) { el.style.left = nx + 'px'; el.style.top = ny + 'px'; }
+  _syncPanelPositions(ci, layout, key);
+  _cvH(ci); // keep the canvas tall enough that auto-scroll can keep going down
+}
 function _pdStart(e, ci, key) {
   if (e.button !== 0) return; e.preventDefault();
-  const pos = _getLayout(ci)[key] || {x:0,y:0};
-  _pd = {ci, key, sx:e.clientX, sy:e.clientY, px:pos.x, py:pos.y};
+  const layout = _getLayout(ci);
+  const pos = layout[key] || {x:0,y:0};
+  _pd = {ci, key, sx:e.clientX, sy:e.clientY, px:pos.x, py:pos.y,
+         orig:_layoutSnapshot(layout), scroller:_panelScroller(ci), scrollDY:0};
+  _pdLast = {x:e.clientX, y:e.clientY};
   const el = document.getElementById(`panel-${ci}-${key}`);
   if (el) { el.style.boxShadow='0 8px 30px rgba(0,0,0,.55)'; el.style.zIndex='20'; }
   document.addEventListener('mousemove', _pdMove);
   document.addEventListener('mouseup', _pdEnd);
+  if (!_pdRAF) _pdRAF = requestAnimationFrame(_autoScrollTick);
 }
 function _pdMove(e) {
   if (!_pd) return;
-  const {ci,key,sx,sy,px,py}=_pd;
-  const nx=Math.max(0,px+(e.clientX-sx)), ny=Math.max(0,py+(e.clientY-sy));
-  _getLayout(ci)[key].x=nx; _getLayout(ci)[key].y=ny;
-  const el=document.getElementById(`panel-${ci}-${key}`);
-  if (el) { el.style.left=nx+'px'; el.style.top=ny+'px'; }
+  _pdLast = {x:e.clientX, y:e.clientY};
+  _applyDragFrame();
 }
 function _pdEnd() {
-  if (!_pd) return;
-  const {ci,key}=_pd; _pd=null;
-  document.removeEventListener('mousemove',_pdMove);
-  document.removeEventListener('mouseup',_pdEnd);
-  const el=document.getElementById(`panel-${ci}-${key}`);
+  const st = _pd || _pr;
+  if (!st) return;
+  const {ci, key} = st;
+  _pd = null; _pr = null;
+  if (_pdRAF) { cancelAnimationFrame(_pdRAF); _pdRAF = null; }
+  document.removeEventListener('mousemove', _pdMove);
+  document.removeEventListener('mousemove', _prMove);
+  document.removeEventListener('mouseup', _pdEnd);
+  document.removeEventListener('touchmove', _pdTMove);
+  document.removeEventListener('touchmove', _prTMove);
+  document.removeEventListener('touchend', _pdEnd);
+  const el = document.getElementById(`panel-${ci}-${key}`);
   if (el) { el.style.boxShadow=''; el.style.zIndex=''; }
+  _clearPanelTransitions(ci);
   _cvH(ci); saveState();
 }
 function _pdTStart(e, ci, key) {
-  const t=e.touches[0];
-  const pos=_getLayout(ci)[key]||{x:0,y:0};
-  _pd={ci,key,sx:t.clientX,sy:t.clientY,px:pos.x,py:pos.y};
-  document.addEventListener('touchmove',_pdTMove,{passive:false});
-  document.addEventListener('touchend',_pdEnd);
+  const t = e.touches[0];
+  const layout = _getLayout(ci);
+  const pos = layout[key] || {x:0,y:0};
+  _pd = {ci, key, sx:t.clientX, sy:t.clientY, px:pos.x, py:pos.y,
+         orig:_layoutSnapshot(layout), scroller:_panelScroller(ci), scrollDY:0};
+  _pdLast = {x:t.clientX, y:t.clientY};
+  document.addEventListener('touchmove', _pdTMove, {passive:false});
+  document.addEventListener('touchend', _pdEnd);
+  if (!_pdRAF) _pdRAF = requestAnimationFrame(_autoScrollTick);
 }
 function _pdTMove(e) {
   e.preventDefault(); if (!_pd) return;
-  const t=e.touches[0];
-  const {ci,key,sx,sy,px,py}=_pd;
-  const nx=Math.max(0,px+(t.clientX-sx)), ny=Math.max(0,py+(t.clientY-sy));
-  _getLayout(ci)[key].x=nx; _getLayout(ci)[key].y=ny;
-  const el=document.getElementById(`panel-${ci}-${key}`);
-  if (el) { el.style.left=nx+'px'; el.style.top=ny+'px'; }
+  const t = e.touches[0];
+  _pdLast = {x:t.clientX, y:t.clientY};
+  _applyDragFrame();
 }
 
 // Resize ──────────────────────────────
+function _applyResizeFrame() {
+  if (!_pr || !_pdLast) return;
+  const {ci, key, sx, sy, sw, sh, rw, rh, orig} = _pr;
+  const layout = _getLayout(ci);
+  if (!layout[key]) return;
+  const nw = rw ? Math.max(200, sw + (_pdLast.x - sx)) : sw;
+  const nh = rh ? Math.max(100, sh + (_pdLast.y - sy) + (_pr.scrollDY || 0)) : sh;
+  Object.keys(orig).forEach(k => { if (k !== key && layout[k]) { layout[k].x = orig[k].x; layout[k].y = orig[k].y; } });
+  layout[key].w = nw; layout[key].h = nh;
+  _resolveCollisions(layout, key);
+  const el = document.getElementById(`panel-${ci}-${key}`);
+  if (el) { el.style.width = nw + 'px'; el.style.height = nh + 'px'; }
+  const sz = document.getElementById(`psz-${ci}-${key}`);
+  if (sz) sz.textContent = Math.round(nw) + '×' + Math.round(nh);
+  _syncPanelPositions(ci, layout, key);
+  _cvH(ci);
+}
 function _prStart(e, ci, key, rw=true, rh=true) {
   e.preventDefault(); e.stopPropagation();
-  const pos=_getLayout(ci)[key]||{w:344,h:180};
-  _pr={ci,key,sx:e.clientX,sy:e.clientY,sw:pos.w,sh:pos.h,rw,rh};
-  document.addEventListener('mousemove',_prMove);
-  document.addEventListener('mouseup',_prEnd);
+  const layout = _getLayout(ci);
+  const pos = layout[key] || {w:344,h:180};
+  _pr = {ci, key, sx:e.clientX, sy:e.clientY, sw:pos.w, sh:pos.h, rw, rh,
+         orig:_layoutSnapshot(layout), scroller:_panelScroller(ci), scrollDY:0};
+  _pdLast = {x:e.clientX, y:e.clientY};
+  document.addEventListener('mousemove', _prMove);
+  document.addEventListener('mouseup', _pdEnd);
+  if (!_pdRAF) _pdRAF = requestAnimationFrame(_autoScrollTick);
 }
 function _prMove(e) {
   if (!_pr) return;
-  const {ci,key,sx,sy,sw,sh,rw,rh}=_pr;
-  const nw=rw ? Math.max(200,sw+(e.clientX-sx)) : sw;
-  const nh=rh ? Math.max(100,sh+(e.clientY-sy)) : sh;
-  _getLayout(ci)[key].w=nw; _getLayout(ci)[key].h=nh;
-  const el=document.getElementById(`panel-${ci}-${key}`);
-  if (el) { el.style.width=nw+'px'; el.style.height=nh+'px'; }
-  const sz=document.getElementById(`psz-${ci}-${key}`);
-  if (sz) sz.textContent=Math.round(nw)+'×'+Math.round(nh);
-}
-function _prEnd() {
-  if (!_pr) return;
-  const {ci}=_pr; _pr=null;
-  document.removeEventListener('mousemove',_prMove);
-  document.removeEventListener('mouseup',_prEnd);
-  _cvH(ci); saveState();
+  _pdLast = {x:e.clientX, y:e.clientY};
+  _applyResizeFrame();
 }
 function _prTStart(e, ci, key, rw=true, rh=true) {
   e.preventDefault(); e.stopPropagation();
-  const t=e.touches[0];
-  const pos=_getLayout(ci)[key]||{w:344,h:180};
-  _pr={ci,key,sx:t.clientX,sy:t.clientY,sw:pos.w,sh:pos.h,rw,rh};
-  document.addEventListener('touchmove',_prTMove,{passive:false});
-  document.addEventListener('touchend',_prEnd);
+  const t = e.touches[0];
+  const layout = _getLayout(ci);
+  const pos = layout[key] || {w:344,h:180};
+  _pr = {ci, key, sx:t.clientX, sy:t.clientY, sw:pos.w, sh:pos.h, rw, rh,
+         orig:_layoutSnapshot(layout), scroller:_panelScroller(ci), scrollDY:0};
+  _pdLast = {x:t.clientX, y:t.clientY};
+  document.addEventListener('touchmove', _prTMove, {passive:false});
+  document.addEventListener('touchend', _pdEnd);
+  if (!_pdRAF) _pdRAF = requestAnimationFrame(_autoScrollTick);
 }
 function _prTMove(e) {
   e.preventDefault(); if (!_pr) return;
-  const t=e.touches[0];
-  const {ci,key,sx,sy,sw,sh,rw,rh}=_pr;
-  const nw=rw ? Math.max(200,sw+(t.clientX-sx)) : sw;
-  const nh=rh ? Math.max(100,sh+(t.clientY-sy)) : sh;
-  _getLayout(ci)[key].w=nw; _getLayout(ci)[key].h=nh;
-  const el=document.getElementById(`panel-${ci}-${key}`);
-  if (el) { el.style.width=nw+'px'; el.style.height=nh+'px'; }
-  const sz=document.getElementById(`psz-${ci}-${key}`);
-  if (sz) sz.textContent=Math.round(nw)+'×'+Math.round(nh);
+  const t = e.touches[0];
+  _pdLast = {x:t.clientX, y:t.clientY};
+  _applyResizeFrame();
 }
 
 function _cvH(ci) {
@@ -5625,7 +5808,7 @@ const _DM_PANELS = [
     icon:'⚔️', label:'Combat Tracker', headerExtra: () => '',
     content: `<div id="combat-tracker-body"></div>` },
   { key:'combatAdd',
-    icon:'➕', label:'Encounter Builder', headerExtra: () => '',
+    icon:'🐉', label:'Bestiary', headerExtra: () => '',
     content: `<div id="combat-add-body"></div>` },
   { key:'partyRef',
     icon:'📋', label:'Player Character Reference', headerExtra: () => '',
@@ -6673,15 +6856,18 @@ function editPlayerSheet(idx) {
 function addPlayer() {
   if (!gmMode) return;
   state.party = state.party || [];
-  state.party.push({ name:'New Player', race:'', cls:'', level:1, hp:10, maxHp:10, ac:10,
+  state.party.push({ name:'New Character', race:'', cls:'', level:1, hp:10, maxHp:10, ac:10,
     initiative:0, speed:30, str:10, dex:10, con:10, int:10, wis:10, cha:10,
     pp:10, pi:10, pinsight:10, languages:'Common',
     profSkills:'', profTools:'', traits:'', equipment:'', notes:'', gmNotes:'',
     userId: null, inventory: [] });
   saveState();
   renderPlayerSubNav();
-  showPlayerSheet(state.party.length - 1);
+  const newIdx = state.party.length - 1;
+  showPlayerSheet(newIdx);
   closeModal();
+  // A blank sheet is useless until it's filled in — jump straight to the editor
+  if (typeof openCharacterEditor === 'function') openCharacterEditor(newIdx);
 }
 
 // ══════════════════════════════════════════════
@@ -7751,85 +7937,83 @@ function openDayEdit() {
   setTimeout(() => document.getElementById('day_val')?.select(), 60);
 }
 
-function openXPEdit() {
-  document.getElementById('modal-title').textContent = '⭐ Set Party XP';
-  document.getElementById('modal-body').innerHTML = `<input id="xp_val" type="number" min="0" value="${state.partyXP||0}" style="width:100%;padding:.4rem .5rem;background:rgba(255,255,255,0.08);color:#e0d6ff;border:1px solid rgba(255,255,255,0.2);border-radius:7px;font-size:1.1rem">`;
+function openXPEdit(idx) {
+  const p = (state.party || [])[idx];
+  if (!p) return;
+  document.getElementById('modal-title').textContent = `⭐ Set XP — ${p.name || 'Character'}`;
+  document.getElementById('modal-body').innerHTML = `<input id="xp_val" type="number" min="0" value="${charXP(p)}" style="width:100%;padding:.4rem .5rem;background:rgba(255,255,255,0.08);color:#e0d6ff;border:1px solid rgba(255,255,255,0.2);border-radius:7px;font-size:1.1rem">`;
   document.getElementById('modal-save').onclick = () => {
-    state.partyXP = parseInt(document.getElementById('xp_val').value)||0;
-    state.partyLevel = getLevel(state.partyXP);
+    setCharXP(p, document.getElementById('xp_val').value);
     saveState();
     closeModal();
+    showPlayerSheet(idx);
     renderXPDisplay();
-    if (typeof renderPartyProgress === 'function') renderPartyProgress();
+    if (typeof _fillPartyProgress === 'function') _fillPartyProgress();
   };
   openModal();
   setTimeout(() => document.getElementById('xp_val')?.select(), 60);
 }
 
-function openLevelUpModal() {
+function openLevelUpModal(idx) {
   if (!gmMode) return;
-  const currentLevel = state.partyLevel || 1;
+  const p = (state.party || [])[idx];
+  if (!p) return;
+  const currentLevel = parseInt(p.level) || 1;
   const newLevel = currentLevel + 1;
   if (newLevel > 20) return;
 
-  const chars = (state.party || []).map((p, idx) => {
-    const hitDie = _getHitDie(p);
-    const conMod = Math.floor(((parseInt(p.con) || 10) - 10) / 2);
-    // 5e 2024: average = floor(die/2) + 1 + CON mod
-    const avg = Math.max(1, Math.floor(hitDie / 2) + 1 + conMod);
-    return { idx, p, hitDie, conMod, avg };
-  });
+  const hitDie = _getHitDie(p);
+  const conMod = Math.floor(((parseInt(p.con) || 10) - 10) / 2);
+  // 5e 2024: average = floor(die/2) + 1 + CON mod
+  const avg = Math.max(1, Math.floor(hitDie / 2) + 1 + conMod);
 
   const modalEl = document.querySelector('#modal-main .modal');
   if (modalEl) modalEl.style.maxWidth = '520px';
 
   const iS = 'padding:.28rem .4rem;background:rgba(255,255,255,.08);color:#e0d6ff;border:1px solid rgba(255,255,255,.18);border-radius:6px;font-size:.88rem;text-align:center';
 
-  document.getElementById('modal-title').textContent = `🎉 Level Up — ${currentLevel} → ${newLevel}`;
+  document.getElementById('modal-title').textContent = `🎉 Level Up — ${p.name || 'Character'} ${currentLevel} → ${newLevel}`;
   document.getElementById('modal-body').innerHTML = `
     <div style="font-size:.78rem;color:#aaa;margin-bottom:.6rem">
-      Each character gains HP. Click <strong style="color:#c9a84c">Avg</strong> to use the class average, or enter a rolled value.
+      ${p.name || 'This character'} gains HP. Click <strong style="color:#c9a84c">Avg</strong> to use the class average, or enter a rolled value.
     </div>
-    ${chars.map(({ idx, p, hitDie, conMod, avg }) => `
-      <div style="display:flex;align-items:center;gap:.5rem;padding:.32rem .5rem;background:rgba(255,255,255,.04);border-radius:7px;margin-bottom:.28rem;border:1px solid rgba(255,255,255,.07)">
-        <div style="flex:1;min-width:0">
-          <div style="font-size:.82rem;font-weight:600;color:#c9a84c;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${p.name||'Player '+(idx+1)}</div>
-          <div style="font-size:.66rem;color:#777">d${hitDie}${conMod>=0?'+':''}${conMod} · avg ${avg>=0?'+':''}${avg} HP</div>
-        </div>
-        <button type="button" onclick="document.getElementById('lu_hp_${idx}').value='${avg}'"
-          style="padding:.18rem .4rem;font-size:.7rem;border-radius:5px;cursor:pointer;border:1px solid rgba(201,168,76,.35);background:rgba(201,168,76,.12);color:#c9a84c;flex-shrink:0;font-family:inherit">Avg</button>
-        <input id="lu_hp_${idx}" type="number" min="1" value="${avg}" style="width:52px;${iS}">
-      </div>`).join('')}
+    <div style="display:flex;align-items:center;gap:.5rem;padding:.32rem .5rem;background:rgba(255,255,255,.04);border-radius:7px;margin-bottom:.28rem;border:1px solid rgba(255,255,255,.07)">
+      <div style="flex:1;min-width:0">
+        <div style="font-size:.82rem;font-weight:600;color:#c9a84c;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${p.name||'Player '+(idx+1)}</div>
+        <div style="font-size:.66rem;color:#777">d${hitDie}${conMod>=0?'+':''}${conMod} · avg ${avg>=0?'+':''}${avg} HP</div>
+      </div>
+      <button type="button" onclick="document.getElementById('lu_hp_${idx}').value='${avg}'"
+        style="padding:.18rem .4rem;font-size:.7rem;border-radius:5px;cursor:pointer;border:1px solid rgba(201,168,76,.35);background:rgba(201,168,76,.12);color:#c9a84c;flex-shrink:0;font-family:inherit">Avg</button>
+      <input id="lu_hp_${idx}" type="number" min="1" value="${avg}" style="width:52px;${iS}">
+    </div>
     <div style="margin-top:.5rem;padding:.4rem .5rem;background:rgba(255,255,255,.03);border-radius:7px;border:1px solid rgba(255,255,255,.06);display:flex;flex-direction:column;gap:.3rem">
       <label style="display:flex;align-items:center;gap:.45rem;cursor:pointer;font-size:.78rem;color:#aaa">
         <input type="checkbox" id="lu_fullheal" style="accent-color:#c9a84c">
-        Also fully restore HP for all characters
+        Also fully restore HP
       </label>
       <label style="display:flex;align-items:center;gap:.45rem;cursor:pointer;font-size:.78rem;color:#aaa">
         <input type="checkbox" id="lu_resethd" checked style="accent-color:#c9a84c">
-        Reset all used Hit Dice
+        Reset used Hit Dice
       </label>
     </div>`;
 
   document.getElementById('modal-save').textContent = `Level Up → ${newLevel}`;
   document.getElementById('modal-save').onclick = () => {
-    state.partyLevel = newLevel;
-    (state.party || []).forEach((p, idx) => {
-      const gain = Math.max(1, parseInt(document.getElementById('lu_hp_' + idx)?.value) || 1);
-      p.maxHp = (parseInt(p.maxHp) || 0) + gain;
-      p.level = newLevel;
-      if (document.getElementById('lu_fullheal')?.checked) {
-        p.hp = p.maxHp;
-      } else {
-        // Heal by the HP gained as part of leveling
-        p.hp = Math.min(p.maxHp, (parseInt(p.hp) || 0) + gain);
-      }
-      if (document.getElementById('lu_resethd')?.checked) p.hitDiceUsed = 0;
-    });
+    const gain = Math.max(1, parseInt(document.getElementById('lu_hp_' + idx)?.value) || 1);
+    p.maxHp = (parseInt(p.maxHp) || 0) + gain;
+    p.level = newLevel;
+    if (document.getElementById('lu_fullheal')?.checked) {
+      p.hp = p.maxHp;
+    } else {
+      // Heal by the HP gained as part of leveling
+      p.hp = Math.min(p.maxHp, (parseInt(p.hp) || 0) + gain);
+    }
+    if (document.getElementById('lu_resethd')?.checked) p.hitDiceUsed = 0;
+    _syncPartyLevel();
     saveState();
     closeModal();
     renderPlayers();
-    if (typeof renderPartyProgress === 'function') renderPartyProgress();
+    if (typeof _fillPartyProgress === 'function') _fillPartyProgress();
     if (typeof _fillPartyRef === 'function') _fillPartyRef();
   };
   openModal();
@@ -8352,11 +8536,56 @@ function applyLayoutPreset(idx, name) {
   const p = state.party[idx];
   if (!p) return;
   if (!(gmMode || p.userId === state.currentUserId)) return;
+  // Player-saved presets are stored by name under state.layoutPresets
+  if (name && name.indexOf('saved:') === 0) {
+    const saved = (state.layoutPresets || {})[name.slice(6)];
+    if (!saved) return;
+    p.sectionLayout = JSON.parse(JSON.stringify(saved));
+    p._sheetV4 = true;
+    saveState();
+    showPlayerSheet(idx);
+    return;
+  }
   const keys = _presetKeys(idx);
   p.sectionLayout = _buildPresetLayout(name, keys);
   p._sheetV2 = true;
   saveState();
   showPlayerSheet(idx);
+}
+
+// ── Named layout presets — save the current board and load it again later ──
+function _savedPresetOptions() {
+  const names = Object.keys(state.layoutPresets || {}).sort((a, b) => a.localeCompare(b));
+  if (!names.length) return '';
+  return `<optgroup label="Saved presets">${names.map(n =>
+    `<option value="saved:${_escHtml(n)}">★ ${_escHtml(n)}</option>`).join('')}</optgroup>`;
+}
+
+function saveLayoutPresetPrompt(idx) {
+  const p = state.party[idx];
+  if (!p || !p.sectionLayout) return;
+  _atlasPrompt('Name this layout preset:', '').then(function(name) {
+    // quotes/brackets would break the <option> markup the name is rendered into
+    name = String(name || '').replace(/["'<>&]/g, '').trim().slice(0, 40);
+    if (!name) return;
+    state.layoutPresets = state.layoutPresets || {};
+    if (state.layoutPresets[name] && !confirm(`A preset named "${name}" already exists. Overwrite it?`)) return;
+    state.layoutPresets[name] = JSON.parse(JSON.stringify(p.sectionLayout));
+    saveState();
+    showPlayerSheet(idx);
+  });
+}
+
+function deleteLayoutPresetPrompt(idx) {
+  const names = Object.keys(state.layoutPresets || {}).sort((a, b) => a.localeCompare(b));
+  if (!names.length) return;
+  _atlasPrompt('Delete which preset?\n' + names.join(', '), '').then(function(name) {
+    name = String(name || '').trim();
+    if (!name || !state.layoutPresets[name]) return;
+    delete state.layoutPresets[name];
+    saveState();
+    showPlayerSheet(idx);
+  });
 }
 
 // ── Clean print / PDF view of one character ───────────────────
@@ -8736,108 +8965,126 @@ function toggleDSave(idx, type, slot) {
 function _fillPartyProgress() {
   const el = document.getElementById('dm-party-progress');
   if (!el) return;
-  const xp = state.partyXP || 0;
-
-  // Compute current level from XP
-  let curLevel = 1;
-  for (let i = 0; i < _LEVEL_XP.length; i++) { if (xp >= _LEVEL_XP[i]) curLevel = i + 1; }
-  const nextLvlXP  = curLevel < 20 ? _LEVEL_XP[curLevel] : null;
-  const prevLvlXP  = _LEVEL_XP[curLevel - 1] || 0;
-  const lvlPct     = nextLvlXP ? Math.min(100, Math.round((xp - prevLvlXP) / (nextLvlXP - prevLvlXP) * 100)) : 100;
-
-  // Compute stat boosts earned from custom table
-  const boostsEarned = _STAT_BOOST_XP.filter(t => xp >= t).length;
-  const nextBoostXP  = _STAT_BOOST_XP.find(t => xp < t) || null;
-  const prevBoostXP  = boostsEarned > 0 ? _STAT_BOOST_XP[boostsEarned - 1] : 0;
-  const boostPct     = nextBoostXP
-    ? Math.min(100, Math.round((xp - prevBoostXP) / (nextBoostXP - prevBoostXP) * 100))
-    : 100;
-
+  const party = state.party || [];
   const btnSty = 'padding:.2rem .55rem;font-size:.74rem;border-radius:5px;cursor:pointer;border:1px solid ';
 
+  const rows = party.map(function(p, idx) {
+    const xp       = charXP(p);
+    const level    = Math.max(1, Math.min(20, parseInt(p.level) || 1));
+    const nextLvlXP = level < 20 ? _LEVEL_XP[level] : null;
+    const prevLvlXP = _LEVEL_XP[level - 1] || 0;
+    const lvlPct    = nextLvlXP ? Math.max(0, Math.min(100, Math.round((xp - prevLvlXP) / (nextLvlXP - prevLvlXP) * 100))) : 100;
+    const ready     = nextLvlXP && xp >= nextLvlXP;
+    const boostsEarned = _STAT_BOOST_XP.filter(t => xp >= t).length;
+    const nextBoostXP  = _STAT_BOOST_XP.find(t => xp < t) || null;
+    return '<div style="display:flex;align-items:center;gap:.55rem;padding:.28rem .45rem;background:rgba(255,255,255,.03);border-radius:7px;border:1px solid ' + (ready ? 'rgba(144,208,144,.35)' : 'rgba(255,255,255,.06)') + '">' +
+      '<div style="flex:1;min-width:0">' +
+        '<div style="display:flex;align-items:baseline;gap:.4rem;flex-wrap:wrap">' +
+          '<span style="font-size:.82rem;font-weight:600;color:#c9a84c;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + (p.name || 'Player ' + (idx + 1)) + '</span>' +
+          '<span style="font-size:.72rem;color:#999">Lvl ' + level + '</span>' +
+          '<span style="font-size:.72rem;color:#777;font-variant-numeric:tabular-nums">' + xp.toLocaleString() + ' XP' + (nextLvlXP ? ' / ' + nextLvlXP.toLocaleString() : '') + '</span>' +
+          '<span style="font-size:.68rem;color:#a080d0">◈ ' + boostsEarned + '/43' + (nextBoostXP ? ' · next ' + nextBoostXP.toLocaleString() : '') + '</span>' +
+          (ready ? '<span style="font-size:.66rem;color:#90d090;font-weight:600">✨ Ready to level!</span>' : '') +
+        '</div>' +
+        '<div style="height:5px;background:rgba(255,255,255,.07);border-radius:3px;overflow:hidden;margin-top:.2rem">' +
+          '<div style="height:100%;width:' + lvlPct + '%;background:' + (ready ? 'linear-gradient(90deg,#70b870,#90d090)' : 'linear-gradient(90deg,#9a7832,#c9a84c)') + ';border-radius:3px;transition:width .4s"></div>' +
+        '</div>' +
+      '</div>' +
+      (ready && level < 20 ? '<button onclick="openLevelUpModal(' + idx + ')" style="' + btnSty + 'rgba(144,208,144,.45);background:rgba(144,208,144,.12);color:#90d090;flex-shrink:0">⬆ Level</button>' : '') +
+    '</div>';
+  }).join('');
+
   el.innerHTML =
-    '<div style="border-top:1px solid rgba(255,255,255,.07);padding-top:.55rem;margin-top:.3rem;display:flex;flex-direction:column;gap:.5rem">' +
-
-      // Row: XP value + buttons
+    '<div style="border-top:1px solid rgba(255,255,255,.07);padding-top:.55rem;margin-top:.3rem;display:flex;flex-direction:column;gap:.45rem">' +
       '<div style="display:flex;align-items:center;gap:.45rem;flex-wrap:wrap">' +
-        '<span style="font-size:1rem;font-weight:700;color:#c9a84c;font-family:\'Cinzel\',serif">Level ' + curLevel + '</span>' +
-        '<span style="font-size:.82rem;color:#888;font-variant-numeric:tabular-nums">' + xp.toLocaleString() + ' XP</span>' +
+        '<span style="font-size:.72rem;color:#999;text-transform:uppercase;letter-spacing:.05em">⭐ Character Experience</span>' +
         '<div style="flex:1"></div>' +
-        '<button onclick="addXP()" style="' + btnSty + 'rgba(201,168,76,.4);background:rgba(201,168,76,.15);color:#c9a84c">+ Add XP</button>' +
-        '<button onclick="setXP()" style="' + btnSty + 'rgba(120,120,150,.3);background:rgba(120,120,150,.1);color:#aaa">Set XP</button>' +
+        '<button onclick="openAwardXPModal(\'add\')" style="' + btnSty + 'rgba(201,168,76,.4);background:rgba(201,168,76,.15);color:#c9a84c">+ Award XP</button>' +
+        '<button onclick="openAwardXPModal(\'set\')" style="' + btnSty + 'rgba(120,120,150,.3);background:rgba(120,120,150,.1);color:#aaa">Set XP</button>' +
       '</div>' +
-
-      // Level progress bar
-      '<div>' +
-        '<div style="display:flex;justify-content:space-between;font-size:.7rem;color:#666;margin-bottom:.18rem">' +
-          '<span style="color:#999">Level Progress</span>' +
-          '<span>' + (nextLvlXP
-            ? (nextLvlXP - xp).toLocaleString() + ' XP → Level ' + (curLevel + 1)
-            : '✦ Maximum Level') + '</span>' +
-        '</div>' +
-        '<div style="height:7px;background:rgba(255,255,255,.07);border-radius:4px;overflow:hidden">' +
-          '<div style="height:100%;width:' + lvlPct + '%;background:linear-gradient(90deg,#9a7832,#c9a84c);border-radius:4px;transition:width .4s"></div>' +
-        '</div>' +
-      '</div>' +
-
-      // Stat boosts progress bar
-      '<div>' +
-        '<div style="display:flex;justify-content:space-between;font-size:.7rem;margin-bottom:.18rem">' +
-          '<span style="color:#a080d0;font-weight:600">◈ Stat Boosts: ' + boostsEarned + ' / 43</span>' +
-          '<span style="color:#666">' + (nextBoostXP
-            ? (nextBoostXP - xp).toLocaleString() + ' XP to next boost'
-            : '✦ All boosts earned') + '</span>' +
-        '</div>' +
-        '<div style="height:6px;background:rgba(255,255,255,.07);border-radius:4px;overflow:hidden">' +
-          '<div style="height:100%;width:' + boostPct + '%;background:linear-gradient(90deg,#503890,#a080d0);border-radius:4px;transition:width .4s"></div>' +
-        '</div>' +
-      '</div>' +
-
-      // Summary line
-      '<div style="font-size:.7rem;color:#555;display:flex;gap:.8rem;flex-wrap:wrap">' +
-        '<span>Total boosts: <strong style="color:#a080d0">' + boostsEarned + '</strong></span>' +
-        (nextLvlXP ? '<span>Next level at: <strong style="color:#c9a84c">' + nextLvlXP.toLocaleString() + ' XP</strong></span>' : '') +
-        (nextBoostXP ? '<span>Next boost at: <strong style="color:#a080d0">' + nextBoostXP.toLocaleString() + ' XP</strong></span>' : '') +
-      '</div>' +
-
+      (rows || '<div style="font-size:.75rem;color:#555;font-style:italic">No characters yet.</div>') +
     '</div>';
 
   // Sync partyLevel for other parts of the codebase that read it
-  state.partyLevel = curLevel;
+  _syncPartyLevel();
 }
 
 function adjustLevel(delta) {
-  // Adjust by jumping to the XP threshold for the new level
-  const xp = state.partyXP || 0;
-  let cur = 1;
-  for (let i = 0; i < _LEVEL_XP.length; i++) { if (xp >= _LEVEL_XP[i]) cur = i + 1; }
-  const newLvl = Math.max(1, Math.min(20, cur + delta));
-  state.partyXP = _LEVEL_XP[newLvl - 1];
-  state.partyLevel = newLvl;
+  // Adjust every character by jumping their XP to the threshold for their new level
+  (state.party || []).forEach(function(p) {
+    const cur = Math.max(1, Math.min(20, parseInt(p.level) || 1));
+    const newLvl = Math.max(1, Math.min(20, cur + delta));
+    p.level = newLvl;
+    setCharXP(p, _LEVEL_XP[newLvl - 1]);
+  });
+  _syncPartyLevel();
   saveState(); _fillPartyProgress();
 }
 
-function addXP() {
-  _atlasPrompt('Add XP (use negative to subtract):', '').then(function(raw) {
-    if (raw === null) return;
-    const amt = parseInt(raw);
-    if (!isNaN(amt) && amt !== 0) {
-      state.partyXP = Math.max(0, (state.partyXP || 0) + amt);
-      saveState(); _fillPartyProgress();
-    }
-  });
+// ── DM: award / set XP for the party, a group, or one character ──
+function openAwardXPModal(mode) {
+  mode = mode === 'set' ? 'set' : 'add';
+  const party = state.party || [];
+  if (!party.length) { alert('No characters yet.'); return; }
+
+  const modalEl = document.querySelector('#modal-main .modal');
+  if (modalEl) modalEl.style.maxWidth = '460px';
+
+  document.getElementById('modal-title').textContent = mode === 'add' ? '✨ Award XP' : '⭐ Set XP';
+  document.getElementById('modal-body').innerHTML = `
+    <div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.7rem">
+      <label style="font-size:.8rem;color:#aaa;white-space:nowrap">${mode === 'add' ? 'XP to award' : 'Set XP to'}</label>
+      <input id="axp_amt" type="number" ${mode === 'set' ? 'min="0"' : ''} placeholder="0" style="flex:1;padding:.4rem .5rem;background:rgba(255,255,255,0.08);color:#e0d6ff;border:1px solid rgba(255,255,255,0.2);border-radius:7px;font-size:1.05rem">
+    </div>
+    ${mode === 'add' ? `
+    <label style="display:flex;align-items:center;gap:.45rem;cursor:pointer;font-size:.78rem;color:#aaa;margin-bottom:.6rem">
+      <input type="checkbox" id="axp_split" style="accent-color:#c9a84c">
+      Split evenly among selected characters
+    </label>` : ''}
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.35rem">
+      <span style="font-size:.72rem;color:#999;text-transform:uppercase;letter-spacing:.05em">Recipients</span>
+      <div style="display:flex;gap:.3rem">
+        <button type="button" onclick="document.querySelectorAll('.axp-char').forEach(c=>c.checked=true)" style="padding:.12rem .4rem;font-size:.68rem;border-radius:4px;cursor:pointer;border:1px solid rgba(255,255,255,.2);background:rgba(255,255,255,.06);color:#aaa;font-family:inherit">All</button>
+        <button type="button" onclick="document.querySelectorAll('.axp-char').forEach(c=>c.checked=false)" style="padding:.12rem .4rem;font-size:.68rem;border-radius:4px;cursor:pointer;border:1px solid rgba(255,255,255,.2);background:rgba(255,255,255,.06);color:#aaa;font-family:inherit">None</button>
+      </div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:.22rem;max-height:260px;overflow-y:auto">
+      ${party.map((p, idx) => `
+        <label style="display:flex;align-items:center;gap:.5rem;cursor:pointer;padding:.26rem .45rem;background:rgba(255,255,255,.04);border-radius:6px;border:1px solid rgba(255,255,255,.07)">
+          <input type="checkbox" class="axp-char" data-idx="${idx}" checked style="accent-color:#c9a84c">
+          <span style="flex:1;font-size:.82rem;color:#ddd;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${p.name || 'Player ' + (idx + 1)}</span>
+          <span style="font-size:.7rem;color:#777;font-variant-numeric:tabular-nums">Lvl ${parseInt(p.level) || 1} · ${charXP(p).toLocaleString()} XP</span>
+        </label>`).join('')}
+    </div>`;
+
+  document.getElementById('modal-save').textContent = mode === 'add' ? 'Award' : 'Set';
+  document.getElementById('modal-save').onclick = () => {
+    const amt = parseInt(document.getElementById('axp_amt')?.value);
+    if (isNaN(amt)) return;
+    const picked = Array.from(document.querySelectorAll('.axp-char'))
+      .filter(c => c.checked)
+      .map(c => parseInt(c.dataset.idx));
+    if (!picked.length) return;
+    const split = mode === 'add' && document.getElementById('axp_split')?.checked;
+    const share = split ? Math.floor(amt / picked.length) : amt;
+    picked.forEach(idx => {
+      const p = (state.party || [])[idx];
+      if (!p) return;
+      setCharXP(p, mode === 'add' ? charXP(p) + share : share);
+    });
+    saveState();
+    closeModal();
+    _fillPartyProgress();
+    if (typeof _fillPartyRef === 'function') _fillPartyRef();
+    if (typeof currentTab !== 'undefined' && currentTab === 'players' && typeof renderPlayers === 'function') renderPlayers();
+  };
+  openModal();
+  setTimeout(() => document.getElementById('axp_amt')?.focus(), 60);
 }
 
-function setXP() {
-  _atlasPrompt('Set party XP to:', '').then(function(raw) {
-    if (raw === null) return;
-    const val = parseInt(String(raw).replace(/,/g,''));
-    if (!isNaN(val) && val >= 0) {
-      state.partyXP = val;
-      saveState(); _fillPartyProgress();
-    }
-  });
-}
+// Legacy entry points — now open the character-aware award modal
+function addXP() { openAwardXPModal('add'); }
+function setXP() { openAwardXPModal('set'); }
 
 // ══════════════════════════════════════════════
 //  RULES REFERENCE — single tabbed panel
@@ -19811,23 +20058,18 @@ function openLegendaryModal(cid) {
   openModal();
 }
 
-function combatApplyDmgField(cid) {
-  var el = document.getElementById('dmg-'+cid);
+// One shared amount field per card — Damage and Heal both read it
+function combatApplyAmount(cid, mode) {
+  var el = document.getElementById('amt-'+cid);
   if (!el) return;
   var amt = parseInt(el.value)||0;
   if (!amt) return;
-  combatDmg(cid, amt);
+  if (mode === 'heal') combatHeal(cid, amt); else combatDmg(cid, amt);
   el.value = '';
 }
-
-function combatApplyHealField(cid) {
-  var el = document.getElementById('heal-'+cid);
-  if (!el) return;
-  var amt = parseInt(el.value)||0;
-  if (!amt) return;
-  combatHeal(cid, amt);
-  el.value = '';
-}
+// Legacy names (kept in case anything still calls them)
+function combatApplyDmgField(cid)  { combatApplyAmount(cid, 'dmg'); }
+function combatApplyHealField(cid) { combatApplyAmount(cid, 'heal'); }
 
 // ══════════════════════════════════════════════
 //  STATUS EFFECTS
@@ -19918,11 +20160,10 @@ function combatEnd() {
 function combatAwardXP(xp) {
   xp = parseInt(xp) || 0;
   if (xp <= 0) { closeModal(); return; }
-  state.partyXP = Math.max(0, (state.partyXP || 0) + xp);
-  if (typeof getLevel === 'function') {
-    state.partyLevel = getLevel(state.partyXP);
-    (state.party || []).forEach(function(p){ p.level = state.partyLevel; });
-  }
+  // XP is tracked per character — every party member earns the full award
+  (state.party || []).forEach(function(p) {
+    if (typeof setCharXP === 'function') setCharXP(p, charXP(p) + xp);
+  });
   _enc().xpEarned = 0;          // consumed — don't double-award
   saveState();
   if (typeof _fillPartyProgress === 'function') _fillPartyProgress();
@@ -19931,7 +20172,7 @@ function combatAwardXP(xp) {
   if (typeof currentTab !== 'undefined' && currentTab === 'players' && typeof renderPlayers === 'function') renderPlayers();
   closeModal();
   if (typeof _showEncToast === 'function')
-    _showEncToast('✨ +' + xp.toLocaleString() + ' XP to the party' + (state.partyLevel ? ' · now level ' + state.partyLevel : ''), '#1a2e10', '#80d060');
+    _showEncToast('✨ +' + xp.toLocaleString() + ' XP to each party member', '#1a2e10', '#80d060');
 }
 
 function combatClear() {
@@ -20205,7 +20446,7 @@ function _renderInitTracker(enc, sorted, curId, myCharIdx) {
 
         <!-- Initiative badge -->
         <div style="flex-shrink:0;width:36px;text-align:center">
-          ${isCurrent ? '<div style="font-size:.55rem;color:#c9a84c;letter-spacing:.06em">TURN</div>' : ''}
+          ${isCurrent ? '<div style="font-size:.45rem;color:#c9a84c;letter-spacing:.05em;white-space:nowrap">INITIATIVE</div>' : ''}
           ${gmMode ? `
           <input type="number"
             id="init-${c.id}"
@@ -20272,36 +20513,19 @@ function _renderInitTracker(enc, sorted, curId, myCharIdx) {
         </div>
       </div>
 
-      <!-- HP quick buttons (GM sees all; players see only their own card) -->
+      <!-- HP adjust: one amount field + Damage / Heal (GM sees all; players see only their own card) -->
       ${canEdit ? `
-      <div style="display:flex;gap:.3rem;align-items:center;padding:.25rem .55rem .35rem;border-top:1px solid rgba(255,255,255,.05);flex-wrap:wrap">
-        <span style="font-size:.6rem;color:#555;width:24px;flex-shrink:0">DMG</span>
-        ${[1,5,10,25].map(function(n){
-          return `<button onclick="combatDmg('${c.id}',${n})"
-            style="padding:.12rem .35rem;font-size:.72rem;background:rgba(160,40,40,.35);border:1px solid rgba(200,80,80,.3);
-                   color:#e09090;border-radius:5px;cursor:pointer;font-family:'JetBrains Mono',monospace">-${n}</button>`;
-        }).join('')}
-        <input id="dmg-${c.id}" type="number" min="0" placeholder="?"
-          style="width:46px;padding:.12rem .25rem;font-size:.75rem;background:rgba(160,40,40,.2);border:1px solid rgba(200,80,80,.25);
-                 color:#e09090;border-radius:5px;outline:none;font-family:'JetBrains Mono',monospace;text-align:center"
-          onkeydown="if(event.key==='Enter')combatApplyDmgField('${c.id}')">
-        <button onclick="combatApplyDmgField('${c.id}')"
-          style="padding:.12rem .3rem;font-size:.72rem;background:rgba(160,40,40,.4);border:1px solid rgba(200,80,80,.3);
-                 color:#e09090;border-radius:5px;cursor:pointer">⚔</button>
-
-        <span style="font-size:.6rem;color:#555;width:28px;flex-shrink:0;margin-left:.2rem">HEAL</span>
-        ${[1,5,10].map(function(n){
-          return `<button onclick="combatHeal('${c.id}',${n})"
-            style="padding:.12rem .35rem;font-size:.72rem;background:rgba(40,140,60,.3);border:1px solid rgba(80,180,80,.3);
-                   color:#80e090;border-radius:5px;cursor:pointer;font-family:'JetBrains Mono',monospace">+${n}</button>`;
-        }).join('')}
-        <input id="heal-${c.id}" type="number" min="0" placeholder="?"
-          style="width:46px;padding:.12rem .25rem;font-size:.75rem;background:rgba(40,140,60,.15);border:1px solid rgba(80,180,80,.2);
-                 color:#80e090;border-radius:5px;outline:none;font-family:'JetBrains Mono',monospace;text-align:center"
-          onkeydown="if(event.key==='Enter')combatApplyHealField('${c.id}')">
-        <button onclick="combatApplyHealField('${c.id}')"
-          style="padding:.12rem .3rem;font-size:.72rem;background:rgba(40,140,60,.35);border:1px solid rgba(80,180,80,.3);
-                 color:#80e090;border-radius:5px;cursor:pointer">❤</button>
+      <div style="display:flex;gap:.35rem;align-items:center;padding:.25rem .55rem .35rem;border-top:1px solid rgba(255,255,255,.05);flex-wrap:wrap">
+        <input id="amt-${c.id}" type="number" min="0" placeholder="Amount"
+          style="width:72px;padding:.16rem .3rem;font-size:.76rem;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.16);
+                 color:#ddd;border-radius:5px;outline:none;font-family:'JetBrains Mono',monospace;text-align:center"
+          onkeydown="if(event.key==='Enter')combatApplyAmount('${c.id}','dmg')">
+        <button onclick="combatApplyAmount('${c.id}','dmg')"
+          style="padding:.16rem .55rem;font-size:.72rem;background:rgba(160,40,40,.35);border:1px solid rgba(200,80,80,.3);
+                 color:#e09090;border-radius:5px;cursor:pointer;font-weight:600">⚔ Damage</button>
+        <button onclick="combatApplyAmount('${c.id}','heal')"
+          style="padding:.16rem .55rem;font-size:.72rem;background:rgba(40,140,60,.3);border:1px solid rgba(80,180,80,.3);
+                 color:#80e090;border-radius:5px;cursor:pointer;font-weight:600">❤ Heal</button>
       </div>` : ''}
 
       <!-- Death Saves (player at 0 HP only) -->
@@ -20396,6 +20620,16 @@ function _renderCombatLog(enc) {
 // ── Add Combatants Panel ──────────────────────
 var _addTab = 'players'; // 'players' | 'monsters' | 'divine' | 'custom'
 
+// Bestiary-style portrait thumbnail for the add-combatant lists
+function _addPanelThumb(name, kind) {
+  var img = (typeof _combatantImg === 'function') ? _combatantImg({name:name, kind:kind}) : '';
+  var inner = img
+    ? '<img src="' + img + '" alt="" style="width:100%;height:100%;object-fit:cover;display:block">'
+    : '<span style="font-size:.6rem;color:#666;font-weight:700">' + ((typeof _ipInitials==='function')?_ipInitials(name):'?') + '</span>';
+  return '<div style="width:34px;height:34px;border-radius:6px;overflow:hidden;flex-shrink:0;background:rgba(0,0,0,.45);'
+    + 'border:1px solid rgba(255,255,255,.1);display:flex;align-items:center;justify-content:center">' + inner + '</div>';
+}
+
 function _renderAddPanel() {
   var el = document.getElementById('combat-add-body');
   if (el) { el.innerHTML = _renderAddPanelHtml(_enc()); _bindCombatInputs(_enc(), _sorted(_enc())); }
@@ -20433,7 +20667,7 @@ function _renderAddPanelHtml(enc) {
   <div style="background:rgba(0,0,0,.45);border:1px solid rgba(255,255,255,.1);border-radius:10px;overflow:hidden">
     <div style="font-size:.62rem;letter-spacing:.07em;text-transform:uppercase;color:#7a5828;
                 padding:.3rem .55rem;background:rgba(0,0,0,.5);border-bottom:1px solid rgba(255,255,255,.08)">
-      ＋ Add Combatants
+      🐉 Bestiary — Add Combatants
     </div>
     <div style="display:flex;flex-wrap:wrap;gap:.25rem;padding:.35rem .4rem;border-bottom:1px solid rgba(255,255,255,.07)">${tabBtns}</div>
     <div style="padding:.4rem .5rem;max-height:520px;overflow-y:auto;scrollbar-width:thin">${body}</div>
@@ -20483,6 +20717,7 @@ function _renderAddMonsters() {
     ${shown.map(function(m, mi) {
       var safeN = m.name.replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
       return `<div style="display:flex;align-items:center;gap:.4rem;padding:.28rem .2rem;border-bottom:1px solid rgba(255,255,255,.05)">
+        ${_addPanelThumb(m.name, 'monster')}
         <div style="flex:1;min-width:0">
           <div style="font-size:.8rem;color:#ddd;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${m.name}</div>
           <div style="font-size:.6rem;color:#555">CR ${m.cr} · HP ${m.hp}</div>
@@ -20510,6 +20745,7 @@ function _renderAddDivine(enc) {
     var added = !!inCombat[b.name];
     return `
     <div style="display:flex;align-items:center;gap:.4rem;padding:.28rem .2rem;border-bottom:1px solid rgba(255,255,255,.05)">
+      ${_addPanelThumb(b.name||'Beast '+(i+1), 'divinebeast')}
       <div style="flex:1;min-width:0">
         <div style="font-size:.8rem;color:#d0b0ff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${b.name||'Beast '+(i+1)}</div>
         <div style="font-size:.6rem;color:#555">${b.type||'Divine Beast'}${b.defeated?' · Defeated':''}</div>
@@ -20547,6 +20783,7 @@ function _renderAddHomebrew(enc) {
       var added = !!inCombat[m.name];
       var crCol = m.cr ? (parseInt(m.cr)<=5?'#4ade80':parseInt(m.cr)<=11?'#facc15':parseInt(m.cr)<=17?'#f97316':'#ef4444') : '#666';
       return `<div style="display:flex;align-items:center;gap:.4rem;padding:.28rem .2rem;border-bottom:1px solid rgba(255,255,255,.05)">
+        ${_addPanelThumb(m.name||'Monster', 'homebrew')}
         <div style="flex:1;min-width:0">
           <div style="font-size:.8rem;color:#80d8b0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${m.name||'Monster'}</div>
           <div style="font-size:.6rem;color:#555">CR <span style="color:${crCol}">${m.cr||'?'}</span> · HP ${m.hp||'?'} · AC ${m.ac||'?'}${m.type?' · '+m.type:''}</div>
@@ -21416,6 +21653,14 @@ function _showEncToast(msg, color, bg) {
 var _ipManual     = null;   // null = auto (follow combat active), true = force shown, false = force hidden
 var _ipLastActive = false;  // last-seen enc.active, to detect transitions
 var _ipCollapsed  = (function(){ try { return localStorage.getItem('si_ip_collapsed') === '1'; } catch(e){ return false; } })();
+// Per-client popup size — every player picks their own, persisted locally
+var _ipScale      = (function(){ try { var v = parseFloat(localStorage.getItem('si_ip_scale')); return (v >= .6 && v <= 2) ? v : 1; } catch(e){ return 1; } })();
+
+function ipScaleAdjust(delta) {
+  _ipScale = Math.max(.6, Math.min(2, Math.round((_ipScale + delta) * 10) / 10));
+  try { localStorage.setItem('si_ip_scale', String(_ipScale)); } catch(e){}
+  renderInitPopup();
+}
 
 // Inject popup CSS + keyframes once
 (function _injectInitPopupCSS() {
@@ -21429,7 +21674,7 @@ var _ipCollapsed  = (function(){ try { return localStorage.getItem('si_ip_collap
     +   'background:linear-gradient(165deg,rgba(18,13,6,.97),rgba(8,6,3,.98));'
     +   'border:1px solid rgba(201,168,76,.4);border-radius:14px;'
     +   'box-shadow:0 10px 38px rgba(0,0,0,.62),inset 0 0 0 1px rgba(255,255,255,.04);'
-    +   'backdrop-filter:blur(3px);max-width:min(96vw,1180px);user-select:none}'
+    +   'backdrop-filter:blur(3px);max-width:min(98vw,1500px);padding:2px;user-select:none}'
     + '#init-popup .ip-head{display:flex;align-items:center;gap:.55rem;padding:.4rem .6rem .4rem .7rem;'
     +   'border-bottom:1px solid rgba(201,168,76,.18);cursor:grab}'
     + '#init-popup .ip-head:active{cursor:grabbing}'
@@ -21497,6 +21742,8 @@ function collapseInitPopup() {
 }
 
 function renderInitPopup() {
+  // The monster art popup follows the same combat lifecycle — keep it in sync
+  if (typeof renderMonsterArtPopup === 'function') { try { renderMonsterArtPopup(); } catch(e){} }
   var enc  = state.encounter;
   var pop  = document.getElementById('init-popup');
   var fab  = document.getElementById('init-popup-fab');
@@ -21542,6 +21789,7 @@ function renderInitPopup() {
     document.body.appendChild(pop);
     _ipApplyPos(pop);
   }
+  pop.style.zoom = _ipScale; // per-client size preference
 
   var sorted = _sorted(enc);
   var curId  = enc.currentTurnId || null;
@@ -21572,6 +21820,8 @@ function renderInitPopup() {
     + (active ? '<span style="font-size:.62rem;color:#6a5a32">\u00b7 ' + visibleCount + '</span>' : '')
     + '<div style="flex:1"></div>'
     + gmCtl
+    + '<div class="ip-ico" onmousedown="event.stopPropagation()" ontouchstart="event.stopPropagation()" onclick="ipScaleAdjust(-.1)" title="Make the tracker smaller (only for you)">\u2212</div>'
+    + '<div class="ip-ico" onmousedown="event.stopPropagation()" ontouchstart="event.stopPropagation()" onclick="ipScaleAdjust(.1)" title="Make the tracker bigger (only for you)">\uff0b</div>'
     + '<div class="ip-ico" onmousedown="event.stopPropagation()" ontouchstart="event.stopPropagation()" onclick="collapseInitPopup()" title="' + (_ipCollapsed?'Expand':'Collapse') + '">' + (_ipCollapsed?'\u25b8':'\u25be') + '</div>'
     + '<div class="ip-ico" onmousedown="event.stopPropagation()" ontouchstart="event.stopPropagation()" onclick="_ipManual=false;renderInitPopup()" title="Hide tracker">\u2715</div>'
     + '</div>';
@@ -21719,6 +21969,140 @@ function _ipDragEnd() {
   document.removeEventListener('touchmove', _ipDragMove);
   document.removeEventListener('mouseup', _ipDragEnd);
   document.removeEventListener('touchend', _ipDragEnd);
+}
+
+// ══════════════════════════════════════════════
+//  MONSTER ART POPUP
+//  Opens automatically when combat starts, showing the bestiary art of
+//  everything the party is fighting. Draggable, closable per-client.
+// ══════════════════════════════════════════════
+var _maManual = null, _maLastActive = false, _maDrag = null;
+
+function toggleMonsterArtPopup() {
+  var visible = !!document.getElementById('monster-art-popup');
+  _maManual = !visible;
+  renderMonsterArtPopup();
+}
+
+function renderMonsterArtPopup() {
+  var enc = state.encounter || {};
+  var combatants = Array.isArray(enc.combatants) ? enc.combatants : [];
+  var active = !!(enc.active && combatants.length);
+  // Auto-show on combat start, auto-hide on end; a manual close/open wins in between
+  if (active !== _maLastActive) { _maManual = null; _maLastActive = active; }
+  var visible = _maManual === null ? active : (_maManual && active);
+
+  // Unique enemy art (players excluded; "Goblin 2" folds into "Goblin")
+  var arts = [], seen = {};
+  combatants.forEach(function(c) {
+    if (c.kind === 'player') return;
+    var base = (c.name || '').replace(/\s+\d+$/, '');
+    if (!base || seen[base]) return;
+    seen[base] = true;
+    arts.push({ name: base, img: (typeof _combatantImg === 'function') ? _combatantImg(c) : '' });
+  });
+
+  var pop = document.getElementById('monster-art-popup');
+  if (!visible || !arts.length) { if (pop) pop.remove(); return; }
+
+  if (!pop) {
+    pop = document.createElement('div');
+    pop.id = 'monster-art-popup';
+    pop.style.cssText = 'position:fixed;z-index:9985;font-family:inherit;'
+      + 'background:linear-gradient(165deg,rgba(18,13,6,.97),rgba(8,6,3,.98));'
+      + 'border:1px solid rgba(201,168,76,.4);border-radius:14px;padding:2px;'
+      + 'box-shadow:0 10px 38px rgba(0,0,0,.62),inset 0 0 0 1px rgba(255,255,255,.04);'
+      + 'max-width:min(94vw,760px);user-select:none';
+    document.body.appendChild(pop);
+    var saved = null;
+    try { saved = JSON.parse(localStorage.getItem('si_ma_pos') || 'null'); } catch(e){}
+    if (saved && typeof saved.left === 'number') {
+      pop.style.left = saved.left + 'px';
+      pop.style.top  = Math.max(0, saved.top) + 'px';
+    } else {
+      pop.style.left = '14px';
+      pop.style.bottom = '14px';
+    }
+  }
+
+  var tiles = arts.map(function(a) {
+    var face = a.img
+      ? '<img src="' + a.img + '" alt="" style="width:100%;height:100%;object-fit:cover;display:block">'
+      : '<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;'
+        + 'font-family:\'Cinzel\',serif;font-weight:700;color:#c9a84c;font-size:1.3rem;'
+        + 'background:radial-gradient(circle at 50% 35%, rgba(201,168,76,.14), rgba(0,0,0,.6))">'
+        + _ipInitials(a.name) + '</div>';
+    return '<div ' + (a.img ? 'onclick="_maZoom(this.dataset.img,this.dataset.name)" data-img="' + a.img.replace(/"/g,'&quot;') + '" data-name="' + a.name.replace(/"/g,'&quot;') + '" title="Click to enlarge" style="cursor:zoom-in;' : 'style="')
+      + 'display:flex;flex-direction:column;align-items:center;gap:.25rem;flex-shrink:0;width:118px">'
+      + '<div style="width:112px;height:112px;border-radius:10px;overflow:hidden;border:2px solid rgba(201,168,76,.45);box-shadow:0 2px 8px rgba(0,0,0,.5)">' + face + '</div>'
+      + '<div style="font-size:.66rem;color:#e0d6c0;max-width:112px;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-family:\'Cinzel\',serif;font-weight:600">' + a.name + '</div>'
+      + '</div>';
+  }).join('');
+
+  pop.innerHTML =
+    '<div onmousedown="_maDragStart(event)" ontouchstart="_maDragStart(event)"'
+    + ' style="display:flex;align-items:center;gap:.55rem;padding:.4rem .6rem .4rem .7rem;border-bottom:1px solid rgba(201,168,76,.18);cursor:grab">'
+    + '<span style="font-size:.62rem;letter-spacing:-1px;color:rgba(201,168,76,.45)">⠿⠿</span>'
+    + '<span style="font-family:\'Cinzel\',serif;font-size:.8rem;font-weight:700;color:#e8cc6c;letter-spacing:.05em;white-space:nowrap">🐉 The Enemy</span>'
+    + '<div style="flex:1"></div>'
+    + '<div onmousedown="event.stopPropagation()" ontouchstart="event.stopPropagation()" onclick="_maManual=false;renderMonsterArtPopup()" title="Hide"'
+    + ' style="width:24px;height:24px;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.12);color:#b9aa85;border-radius:6px;cursor:pointer;font-size:.8rem">✕</div>'
+    + '</div>'
+    + '<div style="display:flex;gap:.6rem;align-items:flex-start;padding:.6rem .7rem;overflow-x:auto;scrollbar-width:thin">' + tiles + '</div>';
+}
+
+// Full-screen lightbox for one piece of monster art
+function _maZoom(src, name) {
+  if (!src) return;
+  var old = document.getElementById('monster-art-zoom');
+  if (old) old.remove();
+  var ov = document.createElement('div');
+  ov.id = 'monster-art-zoom';
+  ov.onclick = function(){ ov.remove(); };
+  ov.style.cssText = 'position:fixed;inset:0;z-index:10050;background:rgba(0,0,0,.82);display:flex;'
+    + 'flex-direction:column;align-items:center;justify-content:center;gap:.7rem;cursor:zoom-out';
+  ov.innerHTML = '<img src="' + src.replace(/"/g,'&quot;') + '" alt="" style="max-width:88vw;max-height:80vh;border-radius:12px;'
+    + 'border:2px solid rgba(201,168,76,.55);box-shadow:0 18px 60px rgba(0,0,0,.8)">'
+    + '<div style="font-family:\'Cinzel\',serif;font-size:1.1rem;font-weight:700;color:#e8cc6c">' + (name||'') + '</div>';
+  document.body.appendChild(ov);
+}
+
+function _maDragStart(e) {
+  var pop = document.getElementById('monster-art-popup');
+  if (!pop) return;
+  var pt = e.touches ? e.touches[0] : e;
+  var rect = pop.getBoundingClientRect();
+  _maDrag = { dx: pt.clientX - rect.left, dy: pt.clientY - rect.top, w: rect.width };
+  pop.style.bottom = 'auto';
+  pop.style.left = rect.left + 'px';
+  pop.style.top  = rect.top + 'px';
+  document.addEventListener('mousemove', _maDragMove);
+  document.addEventListener('touchmove', _maDragMove, { passive:false });
+  document.addEventListener('mouseup', _maDragEnd);
+  document.addEventListener('touchend', _maDragEnd);
+  e.preventDefault();
+}
+function _maDragMove(e) {
+  if (!_maDrag) return;
+  var pop = document.getElementById('monster-art-popup');
+  if (!pop) return;
+  var pt = e.touches ? e.touches[0] : e;
+  var left = Math.max(2, Math.min(window.innerWidth - _maDrag.w - 2, pt.clientX - _maDrag.dx));
+  var top  = Math.max(2, Math.min(window.innerHeight - 40, pt.clientY - _maDrag.dy));
+  pop.style.left = left + 'px';
+  pop.style.top  = top + 'px';
+  if (e.cancelable) e.preventDefault();
+}
+function _maDragEnd() {
+  var pop = document.getElementById('monster-art-popup');
+  if (pop && _maDrag) {
+    try { localStorage.setItem('si_ma_pos', JSON.stringify({ left: parseFloat(pop.style.left), top: parseFloat(pop.style.top) })); } catch(e){}
+  }
+  _maDrag = null;
+  document.removeEventListener('mousemove', _maDragMove);
+  document.removeEventListener('touchmove', _maDragMove);
+  document.removeEventListener('mouseup', _maDragEnd);
+  document.removeEventListener('touchend', _maDragEnd);
 }
 
 </script>
