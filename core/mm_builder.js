@@ -7,7 +7,7 @@
 var _mmM = null;            // active monster object
 var _mmBaseline = null;     // CR row used for deviation flags
 var _mmEditCustomId = null; // editing an existing custom entry
-var _mmTab = 'build';       // 'build' | 'library'
+var _mmTab = 'build';       // the Forge is builder-only; the library moved to the Ability & Spell Index tab
 var _mmLayout = localStorage.getItem('mm_layout') || 'split';
 var _mmPreviewTimer = null;
 var _mmLibCat = 'traits';
@@ -62,7 +62,7 @@ function _mmCSS() {
   '.mm-est{display:flex;gap:.7rem;align-items:center;font-size:.78rem;flex-wrap:wrap}' +
   '.mm-estcr{font-size:1.3rem;font-weight:bold;color:#c9a84c}' +
   '.mm-tag{display:inline-block;background:rgba(128,192,128,.12);border:1px solid rgba(128,192,128,.3);color:#90c890;border-radius:8px;padding:0 .4rem;font-size:.64rem;margin-right:.2rem;cursor:pointer}' +
-  '.mm-modsel{text-align:center}.mm-modsel select{text-align:center}' +
+  '.mm-modsel{text-align:center}.mm-modsel select{text-align:center;font-size:.68rem}.mm-modsel label{text-align:center}' +
   '#mm-prev-tools{display:flex;gap:.4rem;margin-bottom:.6rem;flex-wrap:wrap}' +
   '#mm-prev-tools button{padding:.26rem .6rem;border-radius:5px;cursor:pointer;font-size:.74rem;font-family:inherit;border:1px solid rgba(201,168,76,.4);background:rgba(201,168,76,.1);color:#c9a84c}' +
   mmStatblockCSS();
@@ -105,7 +105,21 @@ function mmShowForgeTab(forceRender) {
 document.addEventListener('click', function(e){
   var t = e.target && e.target.closest ? e.target.closest('[data-tab="creature-forge"], #tab-btn-creature-forge') : null;
   if (t) setTimeout(function(){ mmShowForgeTab(false); }, 0);
+  var ix = e.target && e.target.closest ? e.target.closest('[data-tab="ability-index"], #tab-btn-ability-index') : null;
+  if (ix) setTimeout(function(){ mmShowIndexTab(); }, 0);
 });
+
+// Render the Ability & Spell Index (the former in-Forge Library Manager) into
+// its own tab, right under Creature Forge in the nav.
+function mmShowIndexTab() {
+  if (typeof gmMode !== 'undefined' && !gmMode) return;
+  if (!document.getElementById('mm-style')) {
+    var st = document.createElement('style'); st.id = 'mm-style'; st.textContent = _mmCSS();
+    document.head.appendChild(st);
+  }
+  try { var s = mmLibScan(false); if (s) console.log('[Forge] Library scan:', s); } catch(e) {}
+  if (typeof _mmRenderLibraryManager === 'function') _mmRenderLibraryManager();
+}
 
 function _mmRenderShell() {
   var ov = document.getElementById('mm-tab-root'); if (!ov) return;
@@ -113,8 +127,7 @@ function _mmRenderShell() {
   ov.innerHTML =
     '<div id="mm-head">' +
       '<h2>⚒ The Forge</h2>' +
-      '<button class="mm-tabbtn' + (_mmTab==='build'?' on':'') + '" onclick="_mmTab=\'build\';_mmRenderShell()">Builder</button>' +
-      '<button class="mm-tabbtn' + (_mmTab==='library'?' on':'') + '" onclick="_mmTab=\'library\';_mmRenderShell()">📚 Library Manager</button>' +
+      // The Library Manager moved to its own nav tab: 📚 Ability & Spell Index
       '<span style="flex:1"></span>' +
       (_mmTab==='build' ?
         '<span style="font-size:.66rem;color:#777">Layout:</span>' +
@@ -125,7 +138,6 @@ function _mmRenderShell() {
       '<button class="mm-tabbtn" style="border-color:#c0707066;color:#c07070" onclick="mmCloseMaker()">← Bestiary</button>' +
     '</div>' +
     '<div id="mm-body" class="' + layCls + '"></div>';
-  if (_mmTab === 'library') { _mmRenderLibraryManager(); return; }
   var body = document.getElementById('mm-body');
   if (_mmLayout === 'tabbed') {
     body.innerHTML = '<div style="width:100%;display:flex;flex-direction:column;min-height:0">' +
@@ -238,11 +250,13 @@ function _mmRenderEditor() {
   h += '<div class="mm-card"><h3>Ability Scores <span style="font-weight:normal;text-transform:none;font-size:.66rem;color:#777">— assign CR-median modifiers (' + mods.map(mmSigned).join(', ') + ') or type scores</span></h3>' +
     '<div class="mm-grid mm-g6">';
   MM_ABILS.forEach(function(a, idx){
-    var modOpts = '<option value="">—</option>' + mods.map(function(mo, mi){ return '<option value="' + mo + '">' + mmSigned(mo) + '</option>'; }).join('');
+    var modOpts = '<option value="">median…</option>' + mods.map(function(mo, mi){ return '<option value="' + mo + '">' + mmSigned(mo) + '</option>'; }).join('');
+    // Score front and center with its bonus right underneath; the CR-median
+    // assignment dropdown sits below as the secondary control.
     h += '<div class="mm-f mm-modsel"><label>' + MM_ABIL_LABEL[a].toUpperCase() + '</label>' +
-      '<select data-mmmod="' + a + '" style="margin-bottom:3px">' + modOpts + '</select>' +
-      _mmIn('abil.' + a, m.abil[a], ' type="number" min="1" max="30"') +
-      '<div style="font-size:.66rem;color:#9a8a6a;margin-top:1px">' + mmSigned(mmMod(m.abil[a])) + '</div></div>';
+      _mmIn('abil.' + a, m.abil[a], ' type="number" min="1" max="30" style="text-align:center;font-weight:700;font-size:1.05rem"') +
+      '<div class="mm-abil-mod" style="font-size:.85rem;color:#c9a84c;font-weight:700;margin:2px 0 3px">' + mmSigned(mmMod(m.abil[a])) + '</div>' +
+      '<select data-mmmod="' + a + '" title="Assign one of the CR-median modifiers">' + modOpts + '</select></div>';
   });
   h += '</div><div style="margin-top:.4rem;font-size:.64rem;color:#777">Saving throw proficiencies: ' +
     MM_ABILS.map(function(a){
@@ -277,7 +291,8 @@ function _mmRenderEditor() {
       '</h3><div id="mm-list-' + sec.key + '">';
     (m[sec.key]||[]).forEach(function(e, i){ h += _mmEntryRowHTML(sec.key, i, e); });
     h += '</div><button class="mm-addbtn" onclick="_mmAddEntry(\'' + sec.key + '\')">+ Add ' + sec.label.replace(/s$| \/ Lair/,'') + '</button>' +
-      (sec.key === 'legendary' ? ' <span style="font-size:.66rem;color:#777;margin-left:.6rem">Uses/round: <input data-mmb="legCount" type="number" value="' + (m.legCount||3) + '" style="width:44px;background:rgba(255,255,255,.06);color:#e8dcc0;border:1px solid rgba(255,255,255,.14);border-radius:4px;font-family:inherit;padding:.1rem .2rem"></span>' : '') +
+      (sec.key === 'legendary' ? ' <span style="font-size:.66rem;color:#777;margin-left:.6rem">Uses/round: <input data-mmb="legCount" type="number" value="' + (m.legCount||3) + '" style="width:44px;background:rgba(255,255,255,.06);color:#e8dcc0;border:1px solid rgba(255,255,255,.14);border-radius:4px;font-family:inherit;padding:.1rem .2rem"></span>' +
+        ' <span style="font-size:.66rem;color:#777;margin-left:.6rem" title="Legendary Resistance uses per day — 0 = none">👑 Legendary Resistances/day: <input data-mmb="legRes" type="number" min="0" value="' + (m.legRes||0) + '" style="width:44px;background:rgba(255,255,255,.06);color:#e8dcc0;border:1px solid rgba(255,255,255,.14);border-radius:4px;font-family:inherit;padding:.1rem .2rem"></span>' : '') +
       '</div>';
   });
 
@@ -416,7 +431,7 @@ function _mmBindEditor(root) {
       if (path.length === 2) _mmM[path[0]][path[1]] = v; else _mmM[path[0]] = v;
       if (path[0] === 'bestiaryCat') _mmM.divine = (v === 'divine');
       if (path[0] === 'abil') {
-        var lbl = inp.parentElement.querySelector('div');
+        var lbl = inp.parentElement.querySelector('.mm-abil-mod') || inp.parentElement.querySelector('div');
         if (lbl) lbl.textContent = mmSigned(mmMod(Number(inp.value)||10));
       }
       _mmCheckDeviation(path[0]);

@@ -51,7 +51,7 @@ function mmNewMonster() {
     senses: '', languages: '—',
     traits: [], actions: [], bonus: [], reactions: [], legendary: [],
     loot: [],
-    legCount: 3, lairDesc: '',
+    legCount: 3, legRes: 0, lairDesc: '',
     spellAbil: 'cha', spells: { slots: {}, list: [] },
     god: '', biome: '', divine: false, img: '',
     overrides: {}
@@ -127,7 +127,11 @@ function mmRenderStatblock(mon, opts) {
     h += '<div class="mm-sec">' + title + '</div>';
     arr.forEach(function(e){ h += _mmEntryHTML(e, mon); });
   };
-  if (mon.traits.length) { h += '<hr class="mm-rule">'; mon.traits.forEach(function(e){ h += _mmEntryHTML(e, mon); }); }
+  if (mon.traits.length || (mon.legRes||0) > 0) {
+    h += '<hr class="mm-rule">';
+    if ((mon.legRes||0) > 0) h += '<p class="mm-entry"><span class="mm-ename">Legendary Resistance (' + mon.legRes + '/Day).</span> If ' + _mmEsc(mon.name) + ' fails a saving throw, it can choose to succeed instead.</p>';
+    mon.traits.forEach(function(e){ h += _mmEntryHTML(e, mon); });
+  }
 
   // Spellcasting → rendered at top of Actions (2024 convention)
   var spellBlock = '';
@@ -198,6 +202,7 @@ function mmStatblockPlainText(mon) {
   t.push('Languages ' + (mon.languages || '—'));
   t.push('Challenge ' + mon.cr + ' (' + (row ? row.xp.toLocaleString() : '?') + ' XP) Proficiency ' + mmSigned(pb));
   t.push('');
+  if ((mon.legRes||0) > 0) { t.push('Legendary Resistance (' + mon.legRes + '/Day). If ' + mon.name + ' fails a saving throw, it can choose to succeed instead.'); t.push(''); }
   mon.traits.forEach(function(e){ t.push(e.name + '. ' + mmTokens(e.desc, mon)); t.push(''); });
   var sec = function(title, arr){ if (!arr.length) return; t.push(title); t.push(title); arr.forEach(function(e){ t.push(e.name + '. ' + mmTokens(e.desc, mon)); t.push(''); }); };
   sec('Actions', mon.actions);
@@ -248,6 +253,7 @@ function mmExportMarkdown(mon) {
   L.push('**Languages** :: ' + (mon.languages || '—'));
   L.push('**Challenge** :: ' + mon.cr + ' (' + (row ? row.xp.toLocaleString() : '?') + ' XP, PB ' + mmSigned(pb) + ')');
   L.push('___');
+  if ((mon.legRes||0) > 0) { L.push('***Legendary Resistance (' + mon.legRes + '/Day).*** If ' + mon.name + ' fails a saving throw, it can choose to succeed instead.'); L.push(':'); }
   mon.traits.forEach(function(e){ L.push('***' + e.name + '.*** ' + mmTokens(e.desc, mon)); L.push(':'); });
   var sec = function(title, arr){ if (!arr.length) return; L.push('### ' + title); arr.forEach(function(e){ L.push('***' + e.name + '.*** ' + mmTokens(e.desc, mon)); L.push(':'); }); };
   sec('Actions', mon.actions);
